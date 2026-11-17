@@ -734,3 +734,10 @@ GPL-3.0-or-later: the app is free software, and a modified copy that someone
 distributes has to be free software too. `LICENSE` is the licence's own text,
 fetched from <https://www.gnu.org/licenses/gpl-3.0.txt> rather than retyped;
 `build.sh`, the resources and the tests are all covered by it.
+
+## F-Droid
+
+`fdroid/` holds the metadata entry F-Droid's build server reads
+(`org.phonelink.proxy.yml`, for 0.11.1) and `fdroid/README.md` the reasoning
+behind each field, how to submit it, and how to add the next release's entry.
+Nothing there is shipped in the APK.

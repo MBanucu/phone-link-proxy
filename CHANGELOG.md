@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `fdroid/`: the metadata entry for F-Droid's build server, in the shape
+  `fdroid rewritemeta` produces, lint-clean under `fdroid lint`, with a README
+  that says why `debug.keystore` is scandeleted, why the commit is a full hash
+  and why each release is a hand-added `Builds` block. Submitting it needs a
+  GitLab account.
+
 ## [0.11.1] - 2026-11-17
 
 Nothing in the app behaves differently; the source says what it may be used
