@@ -30,8 +30,13 @@ the phone lives on, so nothing about somebody's real uplink is in them.
 The launcher icon is `res/mipmap-anydpi-v26/ic_launcher.xml`: a white rounded
 phone with an arrow leaving it, on the panel's purple, drawn inside the adaptive
 icon's safe circle; `images/icon.png` is the same drawing at the size stores ask
-for. `ic_stat_proxy` stays what notifications and the tile use, where a
-one-colour silhouette is what the system wants.
+for. The drawing itself, as one SVG at the adaptive icon's 108 dp, is
+`artwork/launcher-icon.svg`: the phone and the arrow are
+`ic_launcher_foreground.xml`, the gradient behind them
+`ic_launcher_background.xml`, and a change starts in the SVG.
+
+`ic_stat_proxy` stays what notifications and the tile use, where a one-colour
+silhouette is what the system wants.
 
 ## Why it exists
 
