@@ -727,3 +727,10 @@ offline it says the check is unknown instead of guessing).
   own to retire; this app's adb contract is the replacement.
 - No `dial` language: it accepts `CONNECT` only. `BIND` and `UDP ASSOCIATE` are
   answered with `command not supported`.
+
+## Licence
+
+GPL-3.0-or-later: the app is free software, and a modified copy that someone
+distributes has to be free software too. `LICENSE` is the licence's own text,
+fetched from <https://www.gnu.org/licenses/gpl-3.0.txt> rather than retyped;
+`build.sh`, the resources and the tests are all covered by it.
