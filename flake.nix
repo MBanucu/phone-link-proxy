@@ -77,6 +77,24 @@
             touch $out
           '';
 
+          # The listing's icon is the rendering of artwork/launcher-icon.svg,
+          # not a second drawing that can drift from it: edit the SVG without
+          # re-rendering and this fails instead of shipping a stale picture.
+          icon =
+            pkgs.runCommand "phone-link-proxy-icon-check"
+              {
+                nativeBuildInputs = [
+                  pkgs.coreutils
+                  pkgs.librsvg
+                ];
+              }
+              ''
+                cp -r ${self} tree
+                chmod -R u+w tree
+                sh tree/artwork/render-icon.sh --check
+                touch $out
+              '';
+
           # The listing carries a changelog per versionCode (tags/versions are not
           # what F-Droid or Play read). A version bump without one is caught
           # here rather than at upload time.
@@ -99,7 +117,11 @@
       );
 
       devShells = eachSystem (pkgs: {
-        default = (android pkgs).shell;
+        # librsvg renders artwork/launcher-icon.svg into the listing's icon; it
+        # is in the shell so `artwork/render-icon.sh` works without a host copy.
+        default = (android pkgs).shell.overrideAttrs (old: {
+          nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.librsvg ];
+        });
       });
 
       formatter = eachSystem (pkgs: pkgs.nixfmt);
