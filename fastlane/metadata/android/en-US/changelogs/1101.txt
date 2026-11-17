@@ -1,0 +1,2 @@
+No behaviour changed. The app's source now states its licence,
+GPL-3.0-or-later, so a fork knows what it may do with the code.

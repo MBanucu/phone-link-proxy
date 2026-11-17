@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-17
+
+Nothing in the app behaves differently; the source says what it may be used
+for, which is what F-Droid's inclusion asks for first.
+
+### Added
+
+- `LICENSE`: GPL-3.0-or-later, the licence's own text from gnu.org rather than
+  a retyping, with a README section naming it and what a distributed fork has
+  to do. The repository had no licence at all, so nobody could tell whether a
+  copy was allowed.
+
 ## [0.11.0] - 2026-11-17
 
 ### Added
