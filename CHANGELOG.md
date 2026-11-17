@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-17
+
+### Added
+
+- A launcher icon of its own: an adaptive icon of a white rounded phone with an
+  arrow leaving it, on the panel's purple, drawn inside the safe circle. Until
+  now a launcher had nothing but the status-bar glyph, so the app sat in the
+  drawer as a grey square with a bell in it. `ic_stat_proxy` is still what
+  notifications and the tile use.
+- Screenshots for the store listing: the list with a proxy running, the Listener
+  page, the Service page and the Log page with a 44 MB download moving through
+  it, taken on the test build with throwaway proxies, plus the 512 px
+  `images/icon.png`. F-Droid and Play can now show what the app looks like.
+
 ## [0.10.0] - 2026-11-17
 
 The first release of the app as its own repository, at the version it carried

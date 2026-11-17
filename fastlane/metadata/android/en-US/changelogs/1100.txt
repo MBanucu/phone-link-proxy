@@ -1,0 +1,2 @@
+The app has a launcher icon of its own: a phone with an arrow leaving it, on the
+panel's purple, instead of the status-bar glyph in a grey tile.
