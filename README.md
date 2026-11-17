@@ -16,11 +16,18 @@ side.
 ## Store metadata
 
 `fastlane/metadata/android/en-US/` holds what a store listing needs: the title,
-the two descriptions and a per-versionCode changelog (`changelogs/<code>.txt`,
-where the code is `major*10000 + minor*100 + patch`). `nix flake check` fails if
-the current `version` has no changelog. Screenshots are still missing, so F-Droid
-or Play would show the app without them; everything else about the listing is
-here.
+the two descriptions, a per-versionCode changelog (`changelogs/<code>.txt`,
+where the code is `major*10000 + minor*100 + patch`), a 512 px `images/icon.png`
+and four screenshots in `images/phoneScreenshots/` — the list with a proxy
+running, the Listener page, the Service page and the Log page with a download
+moving through it. `nix flake check` fails if the current `version` has no
+changelog.
+
+The launcher icon is `res/mipmap-anydpi-v26/ic_launcher.xml`: a white rounded
+phone with an arrow leaving it, on the panel's purple, drawn inside the adaptive
+icon's safe circle; `images/icon.png` is the same drawing at the size stores ask
+for. `ic_stat_proxy` stays what notifications and the tile use, where a
+one-colour silhouette is what the system wants.
 
 ## Why it exists
 

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The phone, and the way out of it: a rounded outline with an arrow leaving
+     its top-right corner, white on the purple field. The arrow's tip is 33
+     units from the centre, which is the adaptive icon's safe circle, so a
+     round, squircle or teardrop mask all keep it. The status-bar mark stays
+     `ic_stat_proxy`: SystemUI tints that one, and it has to be a glyph. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M40,42.5 H56 A7,7 0 0 1 63,49.5 V70.5 A7,7 0 0 1 56,77.5 H40 A7,7 0 0 1 33,70.5 V49.5 A7,7 0 0 1 40,42.5 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M46,62 L64,44"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M76,32 L70.4,49 L59,37.6 Z"
+        android:fillColor="#FFFFFFFF"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineJoin="round" />
+</vector>
