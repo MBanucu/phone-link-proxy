@@ -35,8 +35,9 @@ for. The drawing itself, as one SVG at the adaptive icon's 108 dp, is
 `ic_launcher_foreground.xml`, the gradient behind them
 `ic_launcher_background.xml`, and a change starts in the SVG.
 `artwork/render-icon.sh` rewrites `icon.png` from it (and `--check` says whether
-the committed one is that rendering; `nix flake check` runs exactly that, so the
-picture cannot fall behind the drawing).
+the committed one is that rendering; `nix flake check` runs exactly that, and so
+does the release workflow before it builds a tag, so the picture cannot fall
+behind the drawing).
 
 `ic_stat_proxy` stays what notifications and the tile use, where a one-colour
 silhouette is what the system wants.

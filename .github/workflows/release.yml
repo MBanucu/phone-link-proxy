@@ -55,6 +55,13 @@ jobs:
             echo "PHONE_APP_KEY_ALIAS=$KEY_ALIAS"
           } >> "$GITHUB_ENV"
 
+      # The listing's icon is a rendering of artwork/launcher-icon.svg. A tag
+      # cut on a tree where the SVG moved and icon.png did not would publish a
+      # store picture a version behind, so this runs before the APK is built
+      # (and before the SDK is pulled for it).
+      - name: Check the icon is the drawing
+        run: nix build .#checks.x86_64-linux.icon --no-link
+
       # build.sh signs with whatever PHONE_APP_KEYSTORE names, so this is the
       # same script a local release build runs — and the certificate is read back
       # afterwards, because a build that quietly used the debug key would
