@@ -7,13 +7,28 @@ Small on purpose: no AndroidX, no Gradle, no third-party dependencies, so the
 build is `aapt2` + `javac` + `d8` + `apksigner` and needs nothing from the
 network once the SDK is in the store.
 
+It began as `android/` in the laptop project that drives it over adb and now
+lives on its own: its own build, its own tests, its own releases. The adb
+contract between the two is documented by the app itself — `About this app`,
+and the service's own `dumpsys` dump — and is not expected to change with either
+side.
+
+## Store metadata
+
+`fastlane/metadata/android/en-US/` holds what a store listing needs: the title,
+the two descriptions and a per-versionCode changelog (`changelogs/<code>.txt`,
+where the code is `major*10000 + minor*100 + patch`). `nix flake check` fails if
+the current `version` has no changelog. Screenshots are still missing, so F-Droid
+or Play would show the app without them; everything else about the listing is
+here.
+
 ## Why it exists
 
 - **Egress is cellular by construction.** On the AP link the phone's default
   network is the laptop, so a socket opened on the default route comes back to
   the host that asked for it. `Egress` holds an active `TRANSPORT_CELLULAR`
   `NetworkRequest` and resolves and connects on it —
-  `docs/phone-network.md`, section "How the proxy gets out over cellular".
+  the laptop repository's `docs/phone-network.md`, section "How the proxy gets out over cellular".
 - **It listens on `0.0.0.0`**, so the port is the same on `ap0`, `rndis0` and
   `wlan0` and survives the address changing. That is trap 5 fixed rather than
   worked around.
@@ -57,12 +72,12 @@ redacted SSID is treated as "not the configured one", never as a match.
 ## Build
 
 ```sh
-nix develop .#android
-./android/build.sh
+nix develop
+./build.sh
 ```
 
-The SDK (build-tools 35.0.0 + platform 35) comes from the flake's `android`
-dev shell. `debug.keystore` is tracked in the repository, so every build —
+The SDK (build-tools 35.0.0 + platform 35) comes from this flake's dev
+shell. `debug.keystore` is tracked in the repository, so every build —
 local or in the sandbox — carries the same signature and `adb install -r`
 updates the sideloaded app instead of failing with
 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. It is a throwaway debug key: never ship
@@ -71,7 +86,7 @@ the environment, see below. `build/` stays ignored. Before the key was tracked,
 each `nix build` generated its own and every install needed an uninstall, which
 also deleted the app's stored configuration.
 
-`nix flake check` builds the same APK in the sandbox (`proxy-apk`), and
+`nix flake check` builds the same APK in the sandbox (`apk`), and
 `nix build .#proxy-apk` gives the artifact without a phone. Three APKs come out:
 the app, `capture.apk` (the accessibility dumper the live harness reads the
 screen from) and `devicetest.apk` (the instrumentation that runs the panel's own
@@ -86,7 +101,7 @@ other people is signed with a key that is not:
 ```sh
 PHONE_APP_KEYSTORE=~/keys/phone-link.jks PHONE_APP_KEY_ALIAS=phonelink \
 PHONE_APP_KEYSTORE_PASS=... PHONE_APP_KEY_PASS=... \
-  nix develop .#android -c ./android/build.sh
+  nix develop -c ./build.sh
 ```
 
 The four variables are the keystore (JKS or PKCS12), the alias inside it and the
@@ -112,11 +127,11 @@ plus `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_ALIAS` and optionally
 `ANDROID_KEY_PASS`), reads the certificate out of the finished APK and refuses
 to publish if it is the debug one, then attaches
 `phone-link-proxy-<version>.apk` and its `.sha256` to the release for the tag.
-The version in the name is the app's `android:versionName`, not the flake's:
-the two are versioned separately.
+The version in the name is the app's own `version` file, which is the one
+source `build.sh` stamps into the manifest.
 
-`phone-proxy-install --release` fetches that APK (checksum checked) and installs
-it. A phone that already runs a locally built APK cannot update in place — that
+The laptop repository's `phone-proxy-install` fetches that APK (checksum
+checked) and installs it. A phone that already runs a locally built APK cannot update in place — that
 one carries the debug key — so it needs `--replace-signer` once, which
 uninstalls first and takes the app's saved proxies with it.
 
@@ -133,19 +148,20 @@ uninstalls first and takes the app's saved proxies with it.
   listener; and the `running` flag the tile turns into its subtitle. This is
   why the code has a `Logger` seam, an `Upstream` interface and a config/state
   split instead of `Log.i`, `Egress` and string building inside the service —
-  and why the `script` check carries a JDK.
+  and why the `unit` check carries a JDK.
 - `tests/live/proxy-app.sh` — the steps and the claims, with
   `tests/live/phone.sh` beside it holding how to look at and drive the phone
   (captures, gestures, sequences, the panel's navigation, unlock and settings),
   so a step reads as a claim. It needs a phone with a Wi-Fi client link and the
-  built APK — the *test* one, `android/build/phone-link-proxy-test.apk` (or the
+  built APK — the *test* one, `build/phone-link-proxy-test.apk` (or the
   file named by `PROXY_APP_APK`), which installs as
   `org.phonelink.proxy.test`. The id is the whole of the second instance: its
   own store, its own listeners, its own notification and tile, so a run leaves
   the proxy the phone lives on alone — and the run checks that, by reading the
   other instance's dump before it starts and requiring it to read the same
-  when it ends. It unlocks the phone through `bin/phone-unlock` when
-  `sudo -n` allows it (the shade ignores tile clicks and uiautomator cannot dump
+  when it ends. It unlocks the phone through `PHONE_UNLOCK` — the laptop repository's
+  `bin/phone-unlock`, which reads the root-only PIN — when `sudo -n` allows it,
+  and skips those steps otherwise (the shade ignores tile clicks and uiautomator cannot dump
   a sleeping panel), then: install, open the list, require a card to open its
   proxy, `auto_start` showing on the `Service` segment, the header warning and
   the battery request, `200` through the tunnel, a wrong password refused, the
@@ -193,7 +209,7 @@ uninstalls first and takes the app's saved proxies with it.
 
   A step that is a straight line — open a page, type a name, press its button,
   wait for the page behind — is one `SEQUENCE` broadcast instead of one per tap,
-  key and wait (`android/capture/.../Sequence.java` has the grammar):
+  key and wait (`capture/.../Sequence.java` has the grammar):
   `--es script 'wait class=android.widget.EditText 2000; text harness-new;
   tap-id button1 3000; wait id=back 3000'`. The phone runs it on a thread of
   its own, stamps every instruction in `actions.csv`, and answers with the
@@ -274,7 +290,7 @@ uninstalls first and takes the app's saved proxies with it.
   plus its own dialogs, so the status bar and the launcher behind it stay out
   of the way.
 
-- `android/devicetest/` — the panel's checks that do not need a picture, run by
+- `devicetest/` — the panel's checks that do not need a picture, run by
   the phone itself. `am instrument -w -e first inside-a -e second inside-b
   org.phonelink.proxytest/.PanelTests` loads one `Instrumentation` into the
   proxy's process, starts the activity and reads the views: the badge on a card,
@@ -299,7 +315,7 @@ uninstalls first and takes the app's saved proxies with it.
 ## Run
 
 ```sh
-adb install -r -g android/build/phone-link-proxy.apk
+adb install -r -g build/phone-link-proxy.apk
 
 # start (credentials are required unless anonymous is passed explicitly)
 adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
@@ -668,11 +684,12 @@ writes one, and the app never puts it anywhere by itself.
 
 ## Which build is this
 
-The APK's `versionName` is the project's version and its `versionCode` is
-`major*10000 + minor*100 + patch`, stamped into a copy of `AndroidManifest.xml`
-by `build.sh` from `android/version`. The tracked manifest keeps a template
+The APK's `versionName` is this repository's `version` and its `versionCode`
+is `major*10000 + minor*100 + patch`, stamped into a copy of
+`AndroidManifest.xml` by `build.sh` from that file. The tracked manifest keeps a template
 (`0.0.0`), so a checkout that was never rebuilt does not claim a release, and
-`nix flake check` refuses `android/version` drifting from the flake's `version`.
+`nix flake check` builds it, and the release workflow refuses to publish an APK
+carrying the debug certificate.
 `dumpsys package org.phonelink.proxy | grep versionName` answers which release
 the phone runs, the release asset is named after the same number, and
 `phone-doctor` warns when a newer tag exists (a cached, one-a-day GitHub call;
@@ -685,8 +702,8 @@ offline it says the check is unknown instead of guessing).
 - The boot restart depends on the battery-optimization allowlist (see
   `Run`): with it the start is allowed, without it Android 15 denies the start
   and the listener stays off until the next explicit start or the tile.
-- The `phone-proxy-*` scripts still talk to the old app's screen and its
-  `Start 5G Proxy` / `Stop Proxy Service` buttons. Repointing them at this
-  service is the next change, and it deletes the unlock + uiautomator path.
+- The laptop repository's `phone-proxy-*` scripts that still talk to the old
+  app's screen and its `Start 5G Proxy` / `Stop Proxy Service` buttons are its
+  own to retire; this app's adb contract is the replacement.
 - No `dial` language: it accepts `CONNECT` only. `BIND` and `UDP ASSOCIATE` are
   answered with `command not supported`.

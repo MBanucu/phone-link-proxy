@@ -1,0 +1,30 @@
+Phone link proxy is the SOCKS5 listener a laptop's tunnel talks to when an
+Android phone is the uplink. It is small on purpose: no AndroidX, no Gradle and
+no third-party libraries, so the build is aapt2, javac, d8 and apksigner and
+needs nothing from the network once the SDK is in the store.
+
+Why it exists:
+
+- Egress is cellular by construction. On a laptop-hosted access point the
+  phone's default network is the laptop, so a socket opened on the default
+  route comes back to the host that asked for it. The app holds an active
+  cellular network request and resolves and connects on it.
+- It listens on all interfaces, so the port is the same on a Wi-Fi, hotspot or
+  USB link and survives the address changing.
+- The port only opens while the phone is a client of the SSID the proxy names,
+  so the phone can sit on a hotel or cafe network without offering a relay to
+  it.
+- The wake lock is held only while a client is connected.
+- No screen automation: the service is exported and guarded by
+  android.permission.DUMP, which adb holds and ordinary apps do not, so a
+  wired or wireless adb session starts and stops the listener without the phone
+  being unlocked.
+
+Several proxies can be saved, each with its own port, credentials, SSID and
+settings, and a Quick Settings tile starts and stops the ones it is told to.
+Every proxy keeps its own log and traffic counters. The whole set can be
+exported to a file and imported again, which is the answer to losing them to a
+signing-key change or a reset phone.
+
+The app documents its own adb contract in About this app, which is also what
+the service prints for dumpsys. It holds no credentials on disk.

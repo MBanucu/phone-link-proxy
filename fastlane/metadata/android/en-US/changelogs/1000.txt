@@ -1,0 +1,9 @@
+0.10.0
+
+- Save as… copies a proxy under a new name and opens the copy; a name that is
+  taken is asked about first.
+- All events shows every proxy's events, and says so when the log is empty.
+- Rename moves a proxy's settings, its switches and its in-use mark together.
+- Each control has an info mark, and About this app documents the adb contract.
+- A stopped service publishes the few facts a check needs in a state file that
+  holds no credentials.

@@ -1,4 +1,4 @@
-# The build shell and the APK derivation for the proxy app: a JDK, an Android
+# The build shell and the APK derivation: a JDK, an Android
 # SDK with build-tools and one platform, and zip. Kept out of flake.nix so the
 # flake stays wiring and the SDK (which is large) stays in a shell of its own.
 #
@@ -45,7 +45,7 @@ in
       # added is missing from it, and the "cannot find symbol" errors that follow
       # read as a bug in the code just written.
       if command -v git >/dev/null 2>&1; then
-        untracked=$(git ls-files --others --exclude-standard -- android 2>/dev/null |
+        untracked=$(git ls-files --others --exclude-standard 2>/dev/null |
           grep -E '\.(java|xml)$' || true)
         if [ -n "$untracked" ]; then
           printf '\nnote: untracked files are invisible to nix build:\n%s\n\n' "$untracked" >&2
