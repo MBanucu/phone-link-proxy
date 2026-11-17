@@ -23,6 +23,10 @@ running, the Listener page, the Service page and the Log page with a download
 moving through it. `nix flake check` fails if the current `version` has no
 changelog.
 
+The screenshots are of the **test build** (`org.phonelink.proxy.test`) holding
+three throwaway proxies (`cafe`, `hotel`, `laptop`, user `demo`), not of the app
+the phone lives on, so nothing about somebody's real uplink is in them.
+
 The launcher icon is `res/mipmap-anydpi-v26/ic_launcher.xml`: a white rounded
 phone with an arrow leaving it, on the panel's purple, drawn inside the adaptive
 icon's safe circle; `images/icon.png` is the same drawing at the size stores ask
