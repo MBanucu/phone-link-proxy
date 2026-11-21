@@ -45,6 +45,7 @@ final class Uplink implements Closeable {
 
     private final ConnectivityManager manager;
     private final WifiManager wifiManager;
+    private final android.os.UserManager userManager;
     private final String ssid;
     private final boolean anyNetwork;
     private final Listener listener;
@@ -82,6 +83,7 @@ final class Uplink implements Closeable {
     Uplink(Context context, String ssid, boolean anyNetwork, Listener listener) {
         this.manager = context.getSystemService(ConnectivityManager.class);
         this.wifiManager = context.getSystemService(WifiManager.class);
+        this.userManager = context.getSystemService(android.os.UserManager.class);
         this.ssid = ssid;
         this.anyNetwork = anyNetwork;
         this.listener = listener;
@@ -135,7 +137,14 @@ final class Uplink implements Closeable {
     private String ssid(NetworkCapabilities capabilities) {
         // Reading the SSID is reading location data, which is why the service
         // declares the location foreground type; without it this arrives as
-        // <unknown ssid>.
+        // <unknown ssid>. Before the first unlock the Wi-Fi service answers
+        // nothing at all (the network only comes up after unlock), so do not
+        // even ask: a redacted or empty answer would read as "a different
+        // network" and log a false mismatch on every boot.
+        if (userManager == null || !userManager.isUserUnlocked()) {
+            Log.i(TAG, "SSID unknown before the first unlock; uplink waits for it");
+            return null;
+        }
         Object transport = capabilities.getTransportInfo();
         if (transport instanceof WifiInfo) {
             String reported = ((WifiInfo) transport).getSSID();
