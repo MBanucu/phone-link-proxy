@@ -68,7 +68,20 @@ final class ConfigStore {
     }
 
     private static SharedPreferences prefs(Context context) {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        // Device protected storage, not the default: the boot receiver runs
+        // before the first unlock, where credential protected storage does not
+        // exist yet, and that is exactly when the listener needs its port,
+        // credentials and the two service switches. Once the user is unlocked
+        // the old preferences are moved over, so an update keeps them.
+        Context devices = context.createDeviceProtectedStorageContext();
+        if (context.getSystemService(android.os.UserManager.class).isUserUnlocked()) {
+            try {
+                devices.moveSharedPreferencesFrom(context, PREFS);
+            } catch (RuntimeException e) {
+                Log.w("phone-link-proxy", "cannot move the settings to device protected storage", e);
+            }
+        }
+        return devices.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     /** The same store, for a listener the panel registers while it is visible. */
@@ -117,7 +130,14 @@ final class ConfigStore {
         text.append("ssid ").append(config.ssid).append('\n');
         text.append("any_network ").append(config.anyNetwork).append('\n');
         text.append("in_use ").append(inUse == null ? "" : inUse).append('\n');
-        File dir = context.getExternalFilesDir(null);
+        File dir;
+        try {
+            dir = context.getExternalFilesDir(null);
+        } catch (RuntimeException e) {
+            // Before the first unlock external storage is not mounted; the
+            // doctor's copy is only written for a phone somebody unlocked.
+            return;
+        }
         if (dir == null) {
             return;
         }

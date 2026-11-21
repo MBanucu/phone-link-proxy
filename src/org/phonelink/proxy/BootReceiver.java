@@ -16,10 +16,13 @@ import android.util.Log;
 public final class BootReceiver extends BroadcastReceiver {
 
     @Override
-    public void onReceive(Context context, Intent intent) {
-        if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            return;
-        }
+    public void onReceive(Context context, Intent intent) {String action = intent.getAction();
+// LOCKED_BOOT_COMPLETED is the one that arrives before the first unlock; on
+// this phone it only does so because DokeOS allowlists the app.
+if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
+&& !Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
+return;
+}
         if (!ConfigStore.autoStart(context)) {
             return;
         }

@@ -172,12 +172,29 @@ public final class ProxyService extends Service implements Port.Host {
      *     get there has to give up, or the system kills it without ceremony
      */
     private boolean beginForeground(String text) {
+        Notification notification = buildNotification(text);
+        // Before the first unlock the location type cannot be used at all: its
+        // runtime grant lives in credential-encrypted storage, so the system
+        // refuses it even though checkSelfPermission reports it as granted.
+        // specialUse needs no runtime permission, which is what lets the boot
+        // receiver bring the listener up early. Once the user is unlocked the
+        // location type is what the app has always used, and the old behaviour
+        // (report instead of guessing) is kept for the case where background
+        // location was denied.
+        boolean locked = !getSystemService(android.os.UserManager.class).isUserUnlocked();
+        if (locked && promote(notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)) {
+            return true;
+        }
+        return promote(notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+    }
+
+    /** One foreground attempt with an explicit type. */
+    private boolean promote(Notification notification, int type) {
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(text),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            startForeground(NOTIFICATION_ID, notification, type);
             return true;
         } catch (SecurityException | IllegalStateException e) {
-            Log.w(TAG, "the system refused the foreground service", e);
+            Log.w(TAG, "the system refused foreground type " + type, e);
             return false;
         }
     }
