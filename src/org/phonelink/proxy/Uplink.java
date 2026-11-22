@@ -92,6 +92,15 @@ final class Uplink implements Closeable {
     void start() {
         running = true;
         manager.registerDefaultNetworkCallback(callback, handler);
+        // The Wi-Fi link is not the default network on this phone, so its
+        // connect/disconnect would otherwise never trigger a re-check.
+        try {
+            manager.registerNetworkCallback(new android.net.NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .build(), callback, handler);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "could not watch Wi-Fi networks", e);
+        }
         evaluate();
     }
 
@@ -112,18 +121,27 @@ final class Uplink implements Closeable {
         if (anyNetwork) {
             return new Verdict(true, "any network is allowed");
         }
-        Network active = manager.getActiveNetwork();
-        NetworkCapabilities capabilities =
-                active == null ? null : manager.getNetworkCapabilities(active);
+        // The Wi-Fi this phone is on is usually not the default network: mobile
+        // data carries internet, so the default is cellular while the laptop
+        // link is a secondary Wi-Fi network. Ask for the Wi-Fi link itself.
+        NetworkCapabilities capabilities = wifiCapabilities();
         if (capabilities == null) {
-            return new Verdict(false, "no default network");
-        }
-        if (!capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-            return new Verdict(false, "the default network is not Wi-Fi");
+            Network active = manager.getActiveNetwork();
+            if (active == null) {
+                return new Verdict(false, "no default network");
+            }
+            return new Verdict(false, "no Wi-Fi network is connected");
         }
 
         String connected = ssid(capabilities);
         if (connected == null) {
+            // The platform never reveals the SSID before the first unlock, so the
+            // strict match cannot pass while locked. Accept the Wi-Fi link then
+            // (there is normally only the laptop's own network up at that point)
+            // and resume the exact comparison as soon as the user unlocks.
+            if (userManager != null && !userManager.isUserUnlocked()) {
+                return new Verdict(true, "on Wi-Fi (SSID unreadable before unlock)");
+            }
             return new Verdict(false,
                     "cannot read the Wi-Fi SSID; needs location permission and location on");
         }
@@ -131,6 +149,18 @@ final class Uplink implements Closeable {
             return new Verdict(true, "on \"" + connected + "\"");
         }
         return new Verdict(false, "on \"" + connected + "\", not \"" + ssid + "\"");
+    }
+
+    @SuppressWarnings("deprecation") // getAllNetworks(): the Wi-Fi link is not default
+    private NetworkCapabilities wifiCapabilities() {
+        for (Network network : manager.getAllNetworks()) {
+            NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
+            if (capabilities != null
+                    && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                return capabilities;
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("deprecation") // getConnectionInfo() is the only SSID source that works here
@@ -173,10 +203,12 @@ final class Uplink implements Closeable {
     @Override
     public void close() {
         running = false;
-        try {
-            manager.unregisterNetworkCallback(callback);
-        } catch (IllegalArgumentException e) {
-            // Never registered, or already gone.
+        for (int i = 0; i < 2; i++) {
+            try {
+                manager.unregisterNetworkCallback(callback);
+            } catch (IllegalArgumentException e) {
+                // Never registered, or already gone.
+            }
         }
     }
 }

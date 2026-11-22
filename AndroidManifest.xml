@@ -77,14 +77,18 @@ android:allowBackup="false"
             </intent-filter>
         </activity>
 
-        <!-- One type only: location, which is what makes the SSID readable while
-             the app is not in front. A second `specialUse` type would read as
-             more honest for a proxy, but Android 15 then refuses to start the
-             service from BOOT_COMPLETED, which is exactly where auto_start
-             needs it. --><service
+        <!-- specialUse only. Adding `location` here makes Android 15 reject the
+             start while the user is still locked ("Starting FGS with type
+             location ... must be in the eligible state"): the location grant
+             lives in credential storage and cannot be used pre-unlock, so the
+             boot hand-off died. The location *permission* is still declared —
+             it is what makes the SSID readable — it just must not be part of
+             the foreground service type. -->
+        <service
 android:name="org.phonelink.proxy.ProxyService"
 android:exported="true"
-android:foregroundServiceType="location|specialUse"
+android:directBootAware="true"
+android:foregroundServiceType="specialUse"
 android:permission="android.permission.DUMP">
 <property
 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -106,7 +110,8 @@ android:value="socks proxy listener for the paired laptop" />
 
         <receiver
             android:name="org.phonelink.proxy.BootReceiver"
-            android:exported="true"><intent-filter>
+            android:exported="true"
+            android:directBootAware="true"><intent-filter>
 <action android:name="android.intent.action.BOOT_COMPLETED" />
 <!-- Direct boot: the vendor allowlists the app, so this arrives before
      the first unlock, and the listener can come up with it. -->

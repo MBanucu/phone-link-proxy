@@ -181,11 +181,10 @@ public final class ProxyService extends Service implements Port.Host {
         // location type is what the app has always used, and the old behaviour
         // (report instead of guessing) is kept for the case where background
         // location was denied.
-        boolean locked = !getSystemService(android.os.UserManager.class).isUserUnlocked();
-        if (locked && promote(notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)) {
-            return true;
-        }
-        return promote(notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+        // The manifest declares specialUse only, so that is the only type the
+        // system accepts; passing the location type here would be refused as
+        // "not in the manifest" anyway.
+        return promote(notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
     }
 
     /** One foreground attempt with an explicit type. */
