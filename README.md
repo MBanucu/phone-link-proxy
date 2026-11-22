@@ -81,13 +81,21 @@ The service stays in the foreground while paused and reports why
 itself when the phone rejoins `PhoneLink`. SSID changes arrive as connectivity
 callbacks, so nothing is polled.
 
-Reading the SSID is reading location data, and three things are needed for it,
-all in the manifest: `ACCESS_FINE_LOCATION` granted and location switched on;
+Reading the SSID is reading location data, and two things are needed for it, all
+in the manifest: `ACCESS_FINE_LOCATION` granted and location switched on;
 `ACCESS_WIFI_STATE`, because `WifiManager` is the source that is not redacted on
-this build (the copy in `NetworkCapabilities` reports `<unknown ssid>`); and a
-foreground service of type `location` alongside `specialUse`, because a
-`specialUse`-only service counts as a background app for location access. A
-redacted SSID is treated as "not the configured one", never as a match.
+this build (the copy in `NetworkCapabilities` reports `<unknown ssid>`). The
+service type is `specialUse` only — a `location` type cannot be started before
+the first unlock at all, and is not needed: the SSID reads fine with the
+permission alone.
+
+Before the first unlock the SSID is unavailable by design, so the first row of
+the table above is relaxed: any connected Wi-Fi counts, and the exact
+`PhoneLink` comparison resumes the moment the phone is unlocked. That relax is
+what lets the listener come up during boot; the four gates involved — missing
+`RECEIVE_BOOT_COMPLETED`, `directBootAware` on the receiver rather than the
+application, the unusable `location` service type, and this SSID rule — are
+documented in [docs/pre-unlock-autostart.md](docs/pre-unlock-autostart.md).
 
 ## Build
 
