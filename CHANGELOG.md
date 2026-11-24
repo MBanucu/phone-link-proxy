@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `docs/pre-unlock-autostart.md`: the four gates that keep an app from being
-  started before the first unlock on this firmware, each with its symptom, the
-  offending log line and the check that proves it. Also corrects the README,
+- `docs/pre-unlock-autostart.md`: the four Android gates behind the DokeOS Auto
+  Start Management list that keep an app from being started before the first
+  unlock on this firmware, each with its symptom, the offending log line and
+  the check that proves it. Also corrects the README,
   which claimed a `location` foreground service type was needed to read the
   SSID: that type cannot be started while locked, and the SSID reads without it.
 - `fdroid/`: the metadata entry for F-Droid's build server, in the shape

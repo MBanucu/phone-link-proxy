@@ -92,10 +92,11 @@ permission alone.
 Before the first unlock the SSID is unavailable by design, so the first row of
 the table above is relaxed: any connected Wi-Fi counts, and the exact
 `PhoneLink` comparison resumes the moment the phone is unlocked. That relax is
-what lets the listener come up during boot; the four gates involved — missing
-`RECEIVE_BOOT_COMPLETED`, `directBootAware` on the receiver rather than the
-application, the unusable `location` service type, and this SSID rule — are
-documented in [docs/pre-unlock-autostart.md](docs/pre-unlock-autostart.md).
+what lets the listener come up during boot. The DokeOS Auto Start Management
+list sits in front of four Android gates — a missing `RECEIVE_BOOT_COMPLETED`,
+`directBootAware` on the receiver rather than the application, the unusable
+`location` service type, and this SSID rule — and all five are documented in
+[docs/pre-unlock-autostart.md](docs/pre-unlock-autostart.md).
 
 ## Build
 
@@ -426,34 +427,93 @@ adb shell cmd statusbar click-tile org.phonelink.proxy/.ProxyTile
 
 `click-tile` is a no-op while the shade is closed, so expand it first; to check
 the result, `dumpsys activity services org.phonelink.proxy | grep isForeground`
-should show `types=0x00000008` (location) and `curl` through the port should
-answer `200`.
+should show `isForeground` with the `specialUse` type, and `curl` through the
+port should answer `200`.
 
-The panel's other checkbox, "Start automatically and keep running (also after a
-reboot)", stores `auto_start`. With it on, the app wants the service up all the
+The panel's other checkbox, "Start automatically and keep running", stores
+`auto_start`. With it on, the app wants the service up all the
 time: `START_STICKY` keeps it alive, the boot receiver starts it after a
 reboot, and the SSID gate opens and closes the port as the phone comes and goes
-from the AP, so the tile is not needed in the common case. The boot start is
-best effort: Android 15 refuses some foreground service types from
-`BOOT_COMPLETED`, which is why the service declares `location` alone — a
-`specialUse` type, which would describe a proxy better, cannot be started there
-at all, and Android 15 counts a `location` start from `BOOT_COMPLETED` as a
-background start, which it denies unless an exemption applies. The exemption to
-use is the battery-optimization allowlist, and the panel asks for it itself:
-the line under the auto-start checkbox says whether it is granted, tapping it
-opens the system request, and pressing Start with auto-start on asks when it is
-missing. That line is drawn red and bold while auto-start is on and the
-exemption is missing, and as an ordinary small line once the checkbox is off —
-only a promise the app cannot keep is worth a colour. The adb path has the same switch, and the exemption can be granted
-without touching the phone:
+from the AP, so the tile is not needed in the common case.
+
+A restart after a reboot needs **two independent gates**, and on this phone
+both default to closed:
+
+1. **DokeOS Auto Start Management** — System Manager → App Management → Auto
+   Start Management, with "Phone link proxy" enabled. Without this the vendor
+   marks the package stopped at boot: the boot receiver never runs, so no app
+   code gets a chance to start the service.
+2. **The battery-optimization exemption** —
+   `adb shell cmd deviceidle whitelist +org.phonelink.proxy`. This is the
+   exemption that start needs on Android 15: without it the log says
+   `Background started FGS: Disallowed`. It cannot help if gate 1 kept the
+   receiver from running.
+
+The panel reports and asks for gate 2 only: the line under the auto-start
+checkbox says whether the exemption is granted, tapping it opens the system
+request, and pressing Start with auto-start on asks when it is missing. That
+line is drawn red and bold while auto-start is on and the exemption is missing,
+and as an ordinary small line once the checkbox is off — only a promise the app
+cannot keep is worth a colour. A granted exemption is not a promise of a
+restart: the DokeOS list is separate, cannot be read by the app, and a reboot
+can still be blocked with no warning in the panel.
+
+The adb path has the same switch, and gate 2 can be granted without touching
+the phone:
 
 ```sh
 adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
     -a org.phonelink.proxy.action.START --ez auto_start true
 
-# same as the panel's "Open settings" + Allow; survives reboots
+# gate 2 only: this does not add the app to DokeOS Auto Start Management
 adb shell cmd deviceidle whitelist +org.phonelink.proxy
 ```
+
+### Coming back after a reboot
+
+Both gates, then one reboot to prove it. The DokeOS list has no readable or
+writable API — it needs a signature permission — so it is a screen on the
+phone, not an adb command:
+
+1. Enable "Phone link proxy" in System Manager → App Management → Auto Start
+   Management. If that screen has been driven before on this workspace,
+   `wireless-adb-keeper/autostart-allow.sh "Phone link proxy"` (adb +
+   uiautomator, phone unlocked) or `phone-link-tools/autotoggle` (accessibility
+   service) opens it and flips the row; both still need their one-time manual
+   or accessibility step.
+2. `adb shell cmd deviceidle whitelist +org.phonelink.proxy`
+3. Reboot, then leave the phone alone until `adb connect` works again.
+4. Check that the service is up and the port is open:
+
+```sh
+PORT=1081   # the port this proxy listens on
+adb shell pidof org.phonelink.proxy
+adb shell dumpsys activity services org.phonelink.proxy | grep isForeground
+curl -sS -o /dev/null -w '%{http_code}\n' \
+    --socks5-hostname proxy:"$PHONE_SOCKS_PASS"@192.168.77.232:"$PORT" https://example.com
+```
+
+A pid, `isForeground` in the dump and `200` from the curl are the restart
+working. A blocked boot is the opposite: no pid, no service record, no
+`phone-link-proxy` line in `adb logcat -d`, and the receiver runs only when the
+app is opened. If gate 2 is granted and the boot was still blocked, gate 1 is
+the one to check; DokeOS logs it as
+`BVPFWLogger: AppAutoStartupPolicy: prevent start receiver of package` naming
+the app. `dumpsys package org.phonelink.proxy | grep stopped` reads
+`stopped=true` for a package DokeOS kept from starting — but also for one that
+has never been opened, so read it after a first launch and together with the
+missing boot log line.
+
+Measured for gate 1 alone on the throwaway direct-boot probe kept beside this
+checkout (`../direct-boot-probe`, same phone): without the entry the package
+read `stopped=true` at every boot,
+its process never appeared in a locked window, and that vendor line was in the
+log; with the entry, `LOCKED_BOOT_COMPLETED` arrived about 27 s after boot
+(`receiversSize:11`, up from 1). This app's own restart was measured with both
+gates on — see below. On 2026-11-24 a third app,
+`io.github.mbanucu.wirelessadbkeeper`, showed the late variant on this phone:
+its boot broadcasts were enqueued at +238 s, at the instant the app was opened
+(`process_started_after_boot_s=238`).
 
 Wireless debugging is the other half of that. This phone clears
 `adb_wifi_enabled` on some reboots, and while it is off nothing advertises the
@@ -479,11 +539,12 @@ returns to the list.
 
 The title bar is gone. Its only content was the app's own name, so the layout
 carries a header row of icons instead: the name of the list (or of the open
-proxy with a back arrow), a warning mark that appears exactly while a reboot
-restart cannot work (tapping it opens the battery request, from either screen),
-an `i` for the app's own Info, and the burger. The menu holds `New proxy`,
-`Save`, `Save as…`, `Rename`, `Delete` for the open one, `All events`, and
-`About this app` — the same Info the header's `i` opens. The open proxy carries
+proxy with a back arrow), a warning mark that appears while auto-start is on
+and the battery exemption is missing (tapping it opens the battery request,
+from either screen; it cannot see the DokeOS list, so a blocked boot can still
+have no mark), an `i` for the app's own Info, and the burger. The menu holds
+`New proxy`, `Save`, `Save as…`, `Rename`, `Delete` for the open one,
+`All events`, and `About this app` — the same Info the header's `i` opens. The open proxy carries
 a plain `Save` next to `Revert`, and `Save as…`/`Rename`/`Delete` stay in the
 menu so the form is not crowded.
 
@@ -569,8 +630,9 @@ the same dialog on the phone. The few facts a check needs while the service is
 stopped are still readable: every change to the store rewrites
 `/sdcard/Android/data/org.phonelink.proxy/files/state.txt`, one `key value`
 line each — `auto_start`, `adb_wifi`, `port`, `ssid`, `any_network`, `in_use` —
-so `phone-doctor` can answer "will the proxy come back" for a phone whose
-service is not running. The file holds no credentials.
+so `phone-doctor` can say what auto-start is set to and what Android's battery
+gate reports for a phone whose service is not running. It cannot see the
+DokeOS list. The file holds no credentials.
 
 Measured on the phone (Android 15): with the switch on, `settings put global
 adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with
@@ -579,11 +641,14 @@ new port and `adb connect` working again; with the switch off the log says
 `wireless debugging left alone: the panel switch is off` and the setting keeps
 the value it had.
 
-Measured on the phone (Android 15): without the allowlist the receiver logs
-`Background started FGS: Disallowed`, the service record stays behind with
-`app=null` and no port opens. With it, the service comes back at boot —
-`types=0x00000008`, `uplink allowed: on "PhoneLink"`, `listening on
-0.0.0.0:1081` — and a request through it answers `200`.
+Measured on the phone (Android 15; Blackview XPLORE 2, DokeOS 4.2): with the
+app already allowed in Auto Start Management, taking only the battery exemption
+away makes the receiver log `Background started FGS: Disallowed`, leaves the
+service record behind with `app=null`, and no port opens. With the exemption
+back, the service comes back at boot — `isForeground` with the `specialUse`
+type, `uplink allowed: on "PhoneLink"`, `listening on 0.0.0.0:1081` — and a
+request through it answers `200`. The DokeOS gate was measured separately; that
+measurement is in the reboot checklist above.
 
 A reboot also rotates the wireless-debugging port, so adb needs the new one.
 The phone advertises it over mDNS, which Avahi reads in about a second — much
@@ -727,9 +792,14 @@ offline it says the check is unknown instead of guessing).
 
 - Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has
   no listener from this app. Use the vendored proxy for that mode.
-- The boot restart depends on the battery-optimization allowlist (see
-  `Run`): with it the start is allowed, without it Android 15 denies the start
-  and the listener stays off until the next explicit start or the tile.
+- A boot restart needs two gates, not one (see `Run`): the app enabled in
+  DokeOS Auto Start Management — a signature-protected screen the app cannot
+  read or write — and the battery-optimization exemption. Missing the second,
+  Android 15 refuses the foreground-service start
+  (`Background started FGS: Disallowed`); missing the first, the package is
+  stopped at boot and the receiver never runs at all. The panel can check only
+  the second. Either way the listener stays off until the next explicit start
+  or the tile.
 - The laptop repository's `phone-proxy-*` scripts that still talk to the old
   app's screen and its `Start 5G Proxy` / `Stop Proxy Service` buttons are its
   own to retire; this app's adb contract is the replacement.

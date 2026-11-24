@@ -2,13 +2,38 @@
 
 This app is supposed to have its listener up before the phone's owner touches
 it: the paired laptop reaches it over the `PhoneLink` Wi-Fi during boot, which
-is often the only way in. Getting there took four separate gates, each one
-silent in its own way. This page records them so the next person pays for one
-boot, not thirty.
+is often the only way in. Getting there took four Android gates behind a
+vendor one, each silent in its own way. This page records them so the next
+person pays for one boot, not thirty.
 
 Everything below was established on **Blackview XPLO2EEA0001541, DokeOS 4.2 on
 Android 15 (API 35), unrooted**, by booting repeatedly with the phone left at
 `State: RUNNING_LOCKED`.
+
+## The gate in front of them
+
+Before any of the four below, DokeOS decides whether a package may start at
+boot at all (`Auto Start Management`). A package missing from that list is
+marked stopped at every boot, its process never appears in a locked window,
+and the broadcast resolves `receiversSize:1` instead of the full set. The
+vendor logs it:
+
+```
+BVPFWLogger: AppAutoStartupPolicy: prevent start receiver of package <pkg> ...
+```
+
+After the package was enabled in **System Manager → App Management → Auto Start
+Management**, `LOCKED_BOOT_COMPLETED` arrived about 27 s after boot
+(`receiversSize:11`, was 1) — and the four gates below still had to be right.
+The list is behind a signature permission, so neither an app nor a settings
+command can read or write it; it is a screen, or a driver of that screen, not
+an API.
+
+An earlier version of this page called the list a red herring because it
+reported `isAllowBootStartup=true` for the package while the app still did not
+start. That report did not mean the vendor gate was open: a package stopped at
+boot never reached its receiver, so the four gates below were not the whole
+story.
 
 ## The four gates
 
@@ -37,9 +62,11 @@ for all components. On this firmware it is not applied to receivers, and the
 result is that the broadcast resolves **no component for this package at all** —
 it is not in the `LOCKED_BOOT_COMPLETED` record.
 
-Symptom: the vendor's startup manager reports `isAllowBootStartup=true` for the
-package, `LOCKED_BOOT_COMPLETED` is dispatched to other apps in the same boot,
-and the app still never starts. It receives `BOOT_COMPLETED` after the unlock,
+Symptom: `LOCKED_BOOT_COMPLETED` is dispatched to other apps in the same boot,
+the app still never starts, and the broadcast record resolves no component for
+this package. The vendor's startup manager may still report
+`isAllowBootStartup=true`; as the section above says, that report does not prove
+the vendor gate is open. The app receives `BOOT_COMPLETED` after the unlock,
 which is why it looks like "it only starts late".
 
 Diagnose with the queue, not with logs:
@@ -111,15 +138,6 @@ up, because the SSID cannot be checked. The strict `PhoneLink` match returns at
 unlock. If that is not acceptable for your threat model, the alternative is to
 wait for the unlock and give up the pre-unlock listener.
 
-## What is *not* the problem
-
-The vendor's autostart list (`Auto Start Management`) is a red herring. It
-reported `isAllowBootStartup=true` for the package, and logcat confirmed it even
-excluded the app from its stop sweep (`StopPackagesThread:skip stop
-isAllowBootStartup pkg: <pkg>`) — while the app still never started. Allowlisting
-a package there is still useful for surviving that sweep, but it neither grants
-nor explains `LOCKED_BOOT_COMPLETED`.
-
 ## How to check a build
 
 ```sh
@@ -131,6 +149,8 @@ adb shell dumpsys user | grep -m1 'State:'        # expect RUNNING_LOCKED
 # 1) did the receiver run at all?
 adb logcat -d | grep -E 'Start proc [0-9]+:<pkg>/'
 #    "for broadcast {<pkg>/<pkg>.BootReceiver}" is the proof the gate opened
+#    nothing at all: check the DokeOS list first (the section above) — the
+#    receiver cannot run if DokeOS stopped the package at boot
 
 # 2) is the listener up? 1081 = 0x439 in /proc/net/tcp
 adb shell 'cat /proc/net/tcp /proc/net/tcp6' | grep -c ':0439'
