@@ -773,6 +773,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     /**
      * A restart at boot is a background start, which Android only allows with
      * an exemption; the one a user can grant here is "no battery optimization".
+     * DokeOS Auto Start Management is a separate gate this app cannot read, so the
+     * line this feeds reports only Android's half.
      */
     private boolean batteryExempt() {
         PowerManager power = getSystemService(PowerManager.class);
