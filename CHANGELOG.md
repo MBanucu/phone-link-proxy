@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.3] - 2026-11-26
+## [0.13.0] - 2026-11-26
 
 ### Added
 
@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default 256) through the panel, the profile documents and adb. Two threads per
   live connection mean a higher ceiling costs memory, and the selector relay
   that removes that cost is #37.
+
+## [0.12.3] - 2026-11-26
 
 ### Changed
 
