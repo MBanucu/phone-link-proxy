@@ -9,6 +9,12 @@ RepoType: git
 Repo: https://github.com/MBanucu/phone-link-proxy.git
 
 Builds:
+  - versionName: 0.12.2
+    versionCode: 1202
+    commit: 4c316a1ca0943cefa3d1282b94f9e4b5774d2da1
+    output: build/phone-link-proxy.apk
+    prebuild: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+    build: ./build.sh
   - versionName: 0.12.1
     versionCode: 1201
     commit: 2ac49ea151a932e91b07333499ba2ed0b0d61379
