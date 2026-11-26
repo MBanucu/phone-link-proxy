@@ -211,10 +211,13 @@ uninstalls first and takes the app's saved proxies with it.
 
 - `tests/proxy-app.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
   `Closeables`, `ProxyConfig`, `ProxyState`, `ProxyRuntime` and `Socks5Server`
-  **without** `android.jar` and runs 25 cases: method negotiation, both
-  credential failures, unauthenticated mode, CONNECT for IPv4 and for a domain
-  name, relaying 32 KiB, half-close, a refused command, an unknown address
-  type, an upstream failure reply, client counting, a non-SOCKS greeting; the
+  **without** `android.jar` and runs the protocol and configuration cases:
+  method negotiation, both credential failures, unauthenticated mode, CONNECT
+  for IPv4 and for a domain name, relaying 32 KiB, half-close, 60 concurrent
+  connections, the count returning to the live flows, a half-closed relay
+  released after its linger, saturation refused instead of queued, a refused
+  command, an unknown address type, an upstream failure reply, client counting,
+  a non-SOCKS greeting; the
   configuration rules (port range, credentials, anonymous, SSID, byte limits);
   the status text the panel, the tile and the notification share; the runtime
   listener; and the `running` flag the tile turns into its subtitle. This is

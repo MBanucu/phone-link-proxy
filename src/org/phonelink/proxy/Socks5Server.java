@@ -17,12 +17,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A SOCKS5 server (RFC 1928) with username/password authentication (RFC 1929).
@@ -61,13 +63,27 @@ final class Socks5Server implements Closeable {
     private static final int CONNECT_TIMEOUT_MS = 15_000;
 
     /**
-     * Connections served at once. A handler owns its thread until its tunnel
-     * ends and starts two relay threads of its own, so this is also the bound
-     * on the threads one LAN client can make this process create.
+     * Connections served at once: four times the old 32-connection ceiling and
+     * a full-device tunnel's desktop-sized flow counts.
+     *
+     * <p>Each live connection costs two threads: the handler thread that runs
+     * the handshake and then pumps client-to-upstream, and one relay thread
+     * that pumps upstream-to-client. So the ceiling is
+     * {@code 2 * MAX_CONNECTIONS + 1 accept + 1 shared linger = 258} threads at
+     * 128, against {@code 3 * 32 = 96} for the old three-thread relay. The
+     * handler threads time out after a minute, so idle bursts do not keep the
+     * budget reserved. The ceiling stays fixed: a client cannot make the
+     * process create threads without end.
      */
-    private static final int MAX_CONNECTIONS = 32;
-    /** Accepted clients waiting for a handler; beyond this a connection is refused. */
-    private static final int BACKLOG = 64;
+    static final int MAX_CONNECTIONS = 128;
+    /**
+     * How long the other direction may keep draining after one direction ends.
+     * A client that half-closes while the origin keeps the connection alive
+     * must not pin a handler forever; a failed direction closes both at once.
+     */
+    static final int RELAY_LINGER_MS = 10_000;
+    /** Idle handler threads go away instead of holding the whole ceiling open. */
+    private static final int HANDLER_KEEPALIVE_SECONDS = 60;
 
     /** Called from connection threads. */
     interface Listener {
@@ -106,14 +122,12 @@ final class Socks5Server implements Closeable {
     private final Set<Thread> pumps = ConcurrentHashMap.newKeySet();
     /** Guards close() and what is admitted after it. */
     private final Object lifecycle = new Object();
-    private final ExecutorService handlers = new ThreadPoolExecutor(
-            MAX_CONNECTIONS, MAX_CONNECTIONS, 0L, TimeUnit.MILLISECONDS,
-            new LinkedBlockingQueue<>(BACKLOG),
-            runnable -> {
-                Thread thread = new Thread(runnable, "socks5-handler");
-                thread.setDaemon(true);
-                return thread;
-            });
+    /** One handler per live connection; no queue, so saturation is refused at once. */
+    private final ThreadPoolExecutor handlers;
+    /** One shared thread that closes a half-closed relay after its linger. */
+    private final ScheduledThreadPoolExecutor linger;
+    private final int maxConnections;
+    private final long relayLingerMs;
     private volatile ServerSocket server;
     private volatile boolean running;
     /** Guarded by {@link #lifecycle}: close() has already run. */
@@ -133,6 +147,27 @@ final class Socks5Server implements Closeable {
             Traffic traffic,
             Listener listener,
             Logger logger) {
+        this(port, user, password, upstream, traffic, listener, logger,
+                MAX_CONNECTIONS, RELAY_LINGER_MS);
+    }
+
+    /** The ceiling and linger are parameters so a test can fill a small pool. */
+    Socks5Server(
+            int port,
+            String user,
+            String password,
+            Upstream upstream,
+            Traffic traffic,
+            Listener listener,
+            Logger logger,
+            int maxConnections,
+            long relayLingerMs) {
+        if (maxConnections < 1) {
+            throw new IllegalArgumentException("at least one connection must be served");
+        }
+        if (relayLingerMs < 0) {
+            throw new IllegalArgumentException("the relay linger cannot be negative");
+        }
         this.port = port;
         this.user = user;
         this.password = password;
@@ -140,6 +175,28 @@ final class Socks5Server implements Closeable {
         this.traffic = traffic == null ? new Traffic() : traffic;
         this.listener = listener;
         this.logger = logger;
+        this.maxConnections = maxConnections;
+        this.relayLingerMs = relayLingerMs;
+        handlers = new ThreadPoolExecutor(
+                maxConnections, maxConnections,
+                HANDLER_KEEPALIVE_SECONDS, TimeUnit.SECONDS,
+                // No queue: an accepted client either gets a handler now or is
+                // refused, never parked until a slot happens to free up.
+                new SynchronousQueue<>(),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "socks5-handler");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        handlers.allowCoreThreadTimeOut(true);
+        linger = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "socks5-linger");
+            thread.setDaemon(true);
+            return thread;
+        });
+        // A cancelled linger is a relay that finished on its own; drop its
+        // socket references now instead of leaving them queued for the delay.
+        linger.setRemoveOnCancelPolicy(true);
     }
 
     private void log(String message) {
@@ -153,7 +210,7 @@ final class Socks5Server implements Closeable {
         ServerSocket socket = new ServerSocket();
         try {
             socket.setReuseAddress(true);
-            socket.bind(new InetSocketAddress(port), 50);
+            socket.bind(new InetSocketAddress(port), Math.max(50, maxConnections));
         } catch (IOException e) {
             // A failed bind is not a reason to leak the descriptor.
             Closeables.closeQuietly(socket);
@@ -212,7 +269,7 @@ final class Socks5Server implements Closeable {
                 // process with threads a LAN client asked for.
                 untrack(client);
                 Closeables.closeQuietly(client);
-                log("refused a client: too many connections");
+                log("refused a client: " + maxConnections + " connections already in use");
             }
         }
     }
@@ -397,18 +454,49 @@ final class Socks5Server implements Closeable {
         out.flush();
     }
 
-    /** Shovel bytes both ways until both directions are done, then close. */
+    /**
+     * Shovel bytes both ways until both directions are done, then close.
+     *
+     * <p>The handler thread drives client-to-upstream and one relay thread
+     * drives upstream-to-client, so a live connection costs two threads rather
+     * than three. When a direction ends cleanly the other one gets
+     * {@link #RELAY_LINGER_MS} to drain, then both sockets are closed; a failed
+     * direction ends the tunnel at once. That bound is what stops a client
+     * half-close from pinning a handler while the origin holds its side open.
+     */
     private void relay(Socket client, Socket upstream) {
-        CountDownLatch done = new CountDownLatch(2);
-        pump(client, upstream, done, true);
-        pump(upstream, client, done, false);
-        try {
-            done.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        RelayEnd end = new RelayEnd(client, upstream);
+        CountDownLatch otherDone = new CountDownLatch(1);
+
+        Thread download = new Thread(() -> {
+            boolean clean = copy(upstream, client, false);
+            end.ended(clean);
+            otherDone.countDown();
+        }, "socks5-relay");
+        download.setDaemon(true);
+        synchronized (lifecycle) {
+            if (closed) {
+                // The tunnel is already ending; do not create a thread that
+                // would only block on a socket close() has closed.
+                end.closeBoth();
+                return;
+            }
+            pumps.add(download);
         }
-        Closeables.closeQuietly(client);
-        Closeables.closeQuietly(upstream);
+        download.start();
+        try {
+            boolean clean = copy(client, upstream, true);
+            end.ended(clean);
+            try {
+                otherDone.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        } finally {
+            pumps.remove(download);
+            end.cancel();
+            end.closeBoth();
+        }
     }
 
     /**
@@ -416,44 +504,81 @@ final class Socks5Server implements Closeable {
      *
      * @param uploaded whether this half moves client bytes upstream, which is
      *     only needed for the counters the panel graphs
+     * @return true when the source reached end-of-stream, false when the socket
+     *     failed
      */
-    private void pump(Socket from, Socket to, CountDownLatch done, boolean uploaded) {
-        Thread thread = new Thread(() -> {
-            byte[] buffer = new byte[32 * 1024];
-            try {
-                InputStream in = from.getInputStream();
-                OutputStream out = to.getOutputStream();
-                int read;
-                while ((read = in.read(buffer)) != -1) {
-                    out.write(buffer, 0, read);
-                    if (uploaded) {
-                        traffic.add(read, 0);
-                    } else {
-                        traffic.add(0, read);
-                    }
+    private boolean copy(Socket from, Socket to, boolean uploaded) {
+        byte[] buffer = new byte[32 * 1024];
+        try {
+            InputStream in = from.getInputStream();
+            OutputStream out = to.getOutputStream();
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+                if (uploaded) {
+                    traffic.add(read, 0);
+                } else {
+                    traffic.add(0, read);
                 }
-                // Half close: the other direction may still have data to deliver.
-                to.shutdownOutput();
-            } catch (IOException e) {
-                // One side is gone; closing both unblocks the other pump.
-                Closeables.closeQuietly(from);
-                Closeables.closeQuietly(to);
-            } finally {
-                pumps.remove(Thread.currentThread());
-                done.countDown();
             }
-        }, "socks5-relay");
-        thread.setDaemon(true);
-        synchronized (lifecycle) {
-            if (closed) {
-                // The tunnel is already ending; do not create a thread that
-                // would only block on a socket close() has closed.
-                done.countDown();
+            // Half close: the other direction may still have data to deliver.
+            to.shutdownOutput();
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The shared end of one relay: whichever direction stops first decides how
+     * long the other may keep running.
+     */
+    private final class RelayEnd {
+        private final Socket client;
+        private final Socket upstream;
+        private final AtomicReference<ScheduledFuture<?>> reaper = new AtomicReference<>();
+
+        RelayEnd(Socket client, Socket upstream) {
+            this.client = client;
+            this.upstream = upstream;
+        }
+
+        /**
+         * One direction stopped. A clean half-close gives the other direction
+         * the linger; a failure closes both now so neither pump is left behind.
+         */
+        void ended(boolean clean) {
+            if (!clean) {
+                closeBoth();
                 return;
             }
-            pumps.add(thread);
+            if (reaper.get() != null) {
+                return;
+            }
+            try {
+                ScheduledFuture<?> scheduled = linger.schedule(
+                        this::closeBoth, relayLingerMs, TimeUnit.MILLISECONDS);
+                if (!reaper.compareAndSet(null, scheduled)) {
+                    scheduled.cancel(false);
+                }
+            } catch (RejectedExecutionException e) {
+                // close() has already shut the scheduler and the sockets down.
+                closeBoth();
+            }
         }
-        thread.start();
+
+        /** The other direction finished inside its linger; forget the reaper. */
+        void cancel() {
+            ScheduledFuture<?> scheduled = reaper.getAndSet(null);
+            if (scheduled != null) {
+                scheduled.cancel(false);
+            }
+        }
+
+        void closeBoth() {
+            Closeables.closeQuietly(client);
+            Closeables.closeQuietly(upstream);
+        }
     }
 
     /**
@@ -490,5 +615,6 @@ final class Socks5Server implements Closeable {
             relay.interrupt();
         }
         handlers.shutdownNow();
+        linger.shutdownNow();
     }
 }
