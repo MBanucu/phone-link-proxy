@@ -175,6 +175,130 @@ public final class ProxyAppTest {
             }
         });
 
+        test("more than the old 32-connection ceiling are served at once", () -> {
+            int count = 60;
+            try (Fixture fixture = new Fixture()) {
+                List<Socket> sockets = new ArrayList<>();
+                try {
+                    for (int i = 0; i < count; i++) {
+                        Socket socket = fixture.open();
+                        sockets.add(socket);
+                        connect(socket);
+                    }
+                    assertEqual(count, fixture.clients.get(), "connected clients");
+
+                    for (int i = 0; i < count; i++) {
+                        sockets.get(i).getOutputStream().write(i);
+                        sockets.get(i).getOutputStream().flush();
+                    }
+                    for (int i = 0; i < count; i++) {
+                        byte[] echoed = readFully(sockets.get(i).getInputStream(), 1);
+                        assertEqual(i, echoed[0] & 0xFF, "echo on connection " + i);
+                    }
+                } finally {
+                    for (Socket socket : sockets) {
+                        Closeables.closeQuietly(socket);
+                    }
+                }
+                assertEqual(0, waitForClients(fixture.clients), "clients after the burst");
+            }
+        });
+
+        test("the client count follows the live flows after a burst", () -> {
+            int count = 40;
+            try (Fixture fixture = new Fixture()) {
+                List<Socket> sockets = new ArrayList<>();
+                try {
+                    for (int i = 0; i < count; i++) {
+                        Socket socket = fixture.open();
+                        sockets.add(socket);
+                        connect(socket);
+                    }
+                    // Every one of the first count - 1 ends, leaving one flow.
+                    for (int i = 0; i < count - 1; i++) {
+                        Closeables.closeQuietly(sockets.get(i));
+                    }
+                    assertEqual(1, waitForClients(fixture.clients, 1),
+                            "clients with one live flow");
+
+                    Socket last = sockets.get(count - 1);
+                    last.getOutputStream().write(0x2A);
+                    last.getOutputStream().flush();
+                    assertEqual(0x2A, readFully(last.getInputStream(), 1)[0] & 0xFF,
+                            "the live flow still relays");
+                } finally {
+                    for (Socket socket : sockets) {
+                        Closeables.closeQuietly(socket);
+                    }
+                }
+                assertEqual(0, waitForClients(fixture.clients), "clients after the last close");
+            }
+        });
+
+        test("a half-closed client is released after the relay linger", () -> {
+            long lingerMs = 400;
+            try (HoldingUpstream upstream = new HoldingUpstream();
+                    Fixture fixture = new Fixture(USER, PASSWORD, upstream,
+                            Socks5Server.MAX_CONNECTIONS, lingerMs);
+                    Socket socket = fixture.open()) {
+                connect(socket);
+                socket.shutdownOutput();
+
+                // The origin keeps its side open, so the tunnel may not end at
+                // once: a bounded linger is what releases it.
+                socket.setSoTimeout((int) lingerMs / 2);
+                try {
+                    int read = socket.getInputStream().read();
+                    throw new AssertionError("the half-close ended early: read " + read);
+                } catch (SocketTimeoutException stillOpen) {
+                    // Expected: the other direction is still inside its linger.
+                }
+                socket.setSoTimeout(TIMEOUT_MS);
+                assertClosed(socket, "the half-closed tunnel is closed after the linger");
+                assertEqual(0, waitForClients(fixture.clients), "clients after the linger");
+            }
+        });
+
+        test("a saturated listener refuses a client instead of queueing it", () -> {
+            int max = 4;
+            try (Fixture fixture = new Fixture(USER, PASSWORD, null, max,
+                    Socks5Server.RELAY_LINGER_MS)) {
+                List<Socket> live = new ArrayList<>();
+                try {
+                    for (int i = 0; i < max; i++) {
+                        Socket socket = fixture.open();
+                        live.add(socket);
+                        connect(socket);
+                    }
+                    assertEqual(max, fixture.clients.get(), "connected clients at the ceiling");
+
+                    Socket extra = fixture.open();
+                    try {
+                        long started = System.nanoTime();
+                        assertClosed(extra, "the refused client is closed");
+                        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+                        assertTrue(elapsedMs < 2_000,
+                                "refusal took " + elapsedMs + " ms instead of failing fast");
+                    } finally {
+                        Closeables.closeQuietly(extra);
+                    }
+                    assertEqual(max, fixture.clients.get(),
+                            "a refused client is not counted");
+
+                    // Saturation must not disturb the flows already running.
+                    live.get(0).getOutputStream().write(0x5A);
+                    live.get(0).getOutputStream().flush();
+                    assertEqual(0x5A, readFully(live.get(0).getInputStream(), 1)[0] & 0xFF,
+                            "an existing flow still relays");
+                } finally {
+                    for (Socket socket : live) {
+                        Closeables.closeQuietly(socket);
+                    }
+                }
+                assertEqual(0, waitForClients(fixture.clients), "clients after saturation");
+            }
+        });
+
         test("closing the server ends an established tunnel, stops accepting and is idempotent", () -> {
             Fixture fixture = new Fixture();
             try {
@@ -984,8 +1108,13 @@ public final class ProxyAppTest {
 
     /** The count a connection-thread callback settles on, or the last one seen. */
     private static int waitForClients(AtomicInteger clients) throws InterruptedException {
+        return waitForClients(clients, 0);
+    }
+
+    private static int waitForClients(AtomicInteger clients, int expected)
+            throws InterruptedException {
         long deadline = System.currentTimeMillis() + TIMEOUT_MS;
-        while (clients.get() != 0 && System.currentTimeMillis() < deadline) {
+        while (clients.get() != expected && System.currentTimeMillis() < deadline) {
             Thread.sleep(20);
         }
         return clients.get();
@@ -1049,6 +1178,13 @@ public final class ProxyAppTest {
         greet(socket, 0x02);
         assertEqual(0x02, readMethod(socket), "selected method");
         assertTrue(authenticate(socket, USER, PASSWORD), "credentials refused");
+    }
+
+    /** Handshake and open one CONNECT to the fixture's echo backend. */
+    private static void connect(Socket socket) throws IOException {
+        handshake(socket);
+        requestConnect(socket, 0x01, 0x01, "127.0.0.1", 80);
+        assertEqual(0x00, readReply(socket), "reply code");
     }
 
     private static void requestConnect(
@@ -1124,6 +1260,12 @@ public final class ProxyAppTest {
         }
 
         Fixture(String user, String password, Upstream custom) throws IOException {
+            this(user, password, custom,
+                    Socks5Server.MAX_CONNECTIONS, Socks5Server.RELAY_LINGER_MS);
+        }
+
+        Fixture(String user, String password, Upstream custom, int maxConnections,
+                long relayLingerMs) throws IOException {
             upstream = new FakeUpstream();
             server = new Socks5Server(
                     0,
@@ -1132,7 +1274,9 @@ public final class ProxyAppTest {
                     custom == null ? upstream : custom,
                     traffic,
                     clients::set,
-                    message -> { });
+                    message -> { },
+                    maxConnections,
+                    relayLingerMs);
             server.start();
             port = server.port();
         }
@@ -1160,7 +1304,7 @@ public final class ProxyAppTest {
         volatile int timeoutMs;
 
         FakeUpstream() throws IOException {
-            backend = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
+            backend = new ServerSocket(0, 128, InetAddress.getByName("127.0.0.1"));
             thread = new Thread(this::serve, "echo-backend");
             thread.setDaemon(true);
             thread.start();
@@ -1168,17 +1312,28 @@ public final class ProxyAppTest {
 
         private void serve() {
             while (!backend.isClosed()) {
-                try (Socket socket = backend.accept()) {
-                    byte[] buffer = new byte[8 * 1024];
-                    InputStream in = socket.getInputStream();
-                    OutputStream out = socket.getOutputStream();
-                    int read;
-                    while ((read = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, read);
-                    }
+                try {
+                    Socket socket = backend.accept();
+                    Thread worker = new Thread(() -> echo(socket), "echo-connection");
+                    worker.setDaemon(true);
+                    worker.start();
                 } catch (IOException e) {
                     return;
                 }
+            }
+        }
+
+        private void echo(Socket socket) {
+            try (Socket open = socket) {
+                byte[] buffer = new byte[8 * 1024];
+                InputStream in = open.getInputStream();
+                OutputStream out = open.getOutputStream();
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, read);
+                }
+            } catch (IOException ignored) {
+                // The test closed its end first; that ends this echo.
             }
         }
 
@@ -1201,6 +1356,60 @@ public final class ProxyAppTest {
                 backend.close();
             } catch (IOException ignored) {
                 // The fixture is done with it.
+            }
+        }
+    }
+
+    /**
+     * An origin that keeps its side of the connection open after the client
+     * half-closes: the state the old relay waited in forever.
+     */
+    private static final class HoldingUpstream implements Upstream, AutoCloseable {
+        private final ServerSocket backend;
+        private final Thread thread;
+        private final List<Socket> held = new ArrayList<>();
+
+        HoldingUpstream() throws IOException {
+            backend = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
+            thread = new Thread(this::serve, "holding-backend");
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        private void serve() {
+            while (!backend.isClosed()) {
+                try {
+                    Socket socket = backend.accept();
+                    synchronized (held) {
+                        held.add(socket);
+                    }
+                } catch (IOException e) {
+                    return;
+                }
+            }
+        }
+
+        @Override
+        public Socket connect(String host, int port, int timeoutMs) throws Failure {
+            try {
+                Socket socket = new Socket();
+                socket.connect(new InetSocketAddress("127.0.0.1", backend.getLocalPort()),
+                        timeoutMs);
+                socket.setTcpNoDelay(true);
+                return socket;
+            } catch (IOException e) {
+                throw new Failure(Socks5Server.REPLY_CONNECTION_REFUSED, e.getMessage());
+            }
+        }
+
+        @Override
+        public void close() {
+            Closeables.closeQuietly(backend);
+            synchronized (held) {
+                for (Socket socket : held) {
+                    Closeables.closeQuietly(socket);
+                }
+                held.clear();
             }
         }
     }

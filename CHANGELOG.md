@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The SOCKS5 relay is reaped when one direction half-closes: the other gets a
+  10 s linger before both sockets close, so a client FIN no longer pins a
+  handler until the whole tunnel is restarted. The ceiling is 128 concurrent
+  connections at two threads each (handler plus one relay thread) instead of 32
+  at three, and a client over the ceiling is refused immediately rather than
+  queued (#33).
+
 ## [0.12.1] - 2026-11-26
 
 ### Fixed
