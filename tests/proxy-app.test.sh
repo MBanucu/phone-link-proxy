@@ -37,13 +37,14 @@ sources=(
   "$ROOT/src/org/phonelink/proxy/Socks5Server.java"
   "$ROOT/src/org/phonelink/proxy/Traffic.java"
   "$ROOT/src/org/phonelink/proxy/ProfileDocument.java"
+  "$ROOT/src/org/phonelink/proxy/UplinkPolicy.java"
   "$ROOT/test/org/phonelink/proxy/ProxyAppTest.java"
 )
 
 # The compile is a part of this suite's time worth naming: it is one javac
-# over twelve files, and when the whole check gets slower it matters whether
-# that or the cases did. PHONE_TEST_TIMINGS=<file> gets `part,ms` rows the
-# flake's script check folds into its timings.csv.
+# over the Android-free sources, and when the whole check gets slower it
+# matters whether that or the cases did. PHONE_TEST_TIMINGS=<file> gets
+# `part,ms` rows the flake's script check folds into its timings.csv.
 started=$(date +%s%N)
 if ! "$JAVAC" -encoding UTF-8 -d "$TMP/classes" "${sources[@]}"; then
   printf '\n0 passed, 1 failed\n'
