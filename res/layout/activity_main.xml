@@ -370,6 +370,19 @@
 
                         <LinearLayout style="@style/FieldLabelRow">
                             <CheckBox
+                                android:id="@+id/wifi_lock"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:paddingTop="8dp"
+                                android:text="@string/label_wifi_lock" />
+                            <ImageButton
+                                android:id="@+id/info_wifi_lock"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <CheckBox
                                 android:id="@+id/tile"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"

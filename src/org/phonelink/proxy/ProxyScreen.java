@@ -68,6 +68,7 @@ final class ProxyScreen {
     private final CheckBox anyNetwork;
     private final CheckBox autoStart;
     private final CheckBox adbWireless;
+    private final CheckBox wifiLock;
     private final CheckBox tile;
     private final TextView tileState;
     private final TextView battery;
@@ -126,6 +127,7 @@ final class ProxyScreen {
         anyNetwork = screen.findViewById(R.id.any_network);
         autoStart = screen.findViewById(R.id.auto_start);
         adbWireless = screen.findViewById(R.id.adb_wifi);
+        wifiLock = screen.findViewById(R.id.wifi_lock);
         tile = screen.findViewById(R.id.tile);
         tileState = screen.findViewById(R.id.tile_state);
         battery = screen.findViewById(R.id.battery);
@@ -190,6 +192,7 @@ final class ProxyScreen {
             anyNetwork.setChecked(config.anyNetwork);
             autoStart.setChecked(ConfigStore.profileAutoStart(activity, name));
             adbWireless.setChecked(ConfigStore.profileAdbWireless(activity, name));
+            wifiLock.setChecked(ConfigStore.profileWifiLock(activity, name));
             tile.setChecked(ConfigStore.profileTile(activity, name));
         } finally {
             loading = false;
@@ -358,14 +361,16 @@ final class ProxyScreen {
     }
 
     /**
-     * The two switches, as the store has them: adb can change either one
-     * ({@code --ez auto_start}, {@code --ez adb_wifi}) while the page is open.
+     * The service switches, as the store has them: adb can change any of them
+     * ({@code --ez auto_start}, {@code --ez adb_wifi}, {@code --ez wifi_lock})
+     * while the page is open.
      */
     void syncSwitches() {
         loading = true;
         try {
             autoStart.setChecked(ConfigStore.autoStart(activity));
             adbWireless.setChecked(ConfigStore.adbWireless(activity));
+            wifiLock.setChecked(ConfigStore.wifiLock(activity));
         } finally {
             loading = false;
         }
@@ -377,6 +382,10 @@ final class ProxyScreen {
 
     boolean adbWirelessChecked() {
         return adbWireless.isChecked();
+    }
+
+    boolean wifiLockChecked() {
+        return wifiLock.isChecked();
     }
 
     /**
@@ -432,7 +441,8 @@ final class ProxyScreen {
                 || anonymousNow != stored.anonymous
                 || anyNetwork.isChecked() != stored.anyNetwork
                 || autoStart.isChecked() != ConfigStore.profileAutoStart(activity, name)
-                || adbWireless.isChecked() != ConfigStore.profileAdbWireless(activity, name);
+                || adbWireless.isChecked() != ConfigStore.profileAdbWireless(activity, name)
+                || wifiLock.isChecked() != ConfigStore.profileWifiLock(activity, name);
     }
 
     // -- the details -----------------------------------------------------
@@ -463,6 +473,7 @@ final class ProxyScreen {
         ssid.addTextChangedListener(watcher);
         anonymous.setOnCheckedChangeListener((button, checked) -> renderPending());
         anyNetwork.setOnCheckedChangeListener((button, checked) -> renderPending());
+        wifiLock.setOnCheckedChangeListener((button, checked) -> renderPending());
     }
 
     private boolean isRunning() {

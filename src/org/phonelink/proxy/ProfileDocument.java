@@ -29,6 +29,7 @@ final class ProfileDocument {
         ProxyConfig config = ProxyConfig.defaults();
         boolean autoStart;
         boolean adbWireless = true;
+        boolean wifiLock;
         boolean tile;
     }
 
@@ -116,6 +117,7 @@ final class ProfileDocument {
                 + ", \"any_network\": " + entry.config.anyNetwork
                 + ", \"auto_start\": " + entry.autoStart
                 + ", \"adb_wifi\": " + entry.adbWireless
+                + ", \"wifi_lock\": " + entry.wifiLock
                 + ", \"tile\": " + entry.tile + "}";
     }
 
@@ -166,6 +168,7 @@ final class ProfileDocument {
         entry.adbWireless = object.containsKey("adb_wifi")
                 ? flag(object.get("adb_wifi"))
                 : true;
+        entry.wifiLock = flag(object.get("wifi_lock"));
         entry.tile = flag(object.get("tile"));
         return entry;
     }
