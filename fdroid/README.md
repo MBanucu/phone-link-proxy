@@ -34,7 +34,7 @@ That is what F-Droid's build server offers — Debian userland, no nix, and
 
 - `License: GPL-3.0-or-later` is the licence in `LICENSE`, added in 0.11.1.
   F-Droid refuses an app whose source does not say what it may be used for.
-- `commit` is the full hash of the `v0.11.1` tag, not the tag name: F-Droid
+- `commit` is the full hash of the release tag, not the tag name: F-Droid
   pins the commit so a moved tag cannot change what is being built.
 - no `scandelete` or keystore entry: `build.sh` generates a throwaway dev key
   at `build/dev.keystore` on first use (mode 600, password `android`) and
@@ -49,10 +49,10 @@ uninstalls first, which clears the app's saved proxies — export them before.
 
 ## Updating it for a release
 
-`versionCode` is derived from `version` at build time (`0.11.1` → 1101) rather
+`versionCode` is derived from `version` at build time (`0.12.0` → 1200) rather
 than written into `AndroidManifest.xml`, whose `versionCode="0"` is a
 placeholder. `fdroid checkupdates` reads the manifest in each tagged revision,
-so it cannot see 1101 and would record 0 — which is why the entry sets
+so it cannot see 1200 and would record 0 — which is why the entry sets
 `AutoUpdateMode: None` and `UpdateCheckMode: None`.
 
 The cost of that: each release is one more `Builds` block, added by hand with
