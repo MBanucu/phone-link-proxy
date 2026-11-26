@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The connection ceiling is 256 instead of 128. A desktop browser alone held
+  about a hundred keep-alive flows; Chrome plus a handful of tools reached the
+  128 limit, so the next refusal hit ordinary desktop use. The thread cost stays
+  two per live connection (514 threads at the ceiling), inside the phone's
+  process limit (#37).
+
 ## [0.12.2] - 2026-11-26
 
 ### Fixed

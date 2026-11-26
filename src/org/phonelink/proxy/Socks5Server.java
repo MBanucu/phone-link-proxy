@@ -69,13 +69,19 @@ final class Socks5Server implements Closeable {
      * <p>Each live connection costs two threads: the handler thread that runs
      * the handshake and then pumps client-to-upstream, and one relay thread
      * that pumps upstream-to-client. So the ceiling is
-     * {@code 2 * MAX_CONNECTIONS + 1 accept + 1 shared linger = 258} threads at
-     * 128, against {@code 3 * 32 = 96} for the old three-thread relay. The
+     * {@code 2 * MAX_CONNECTIONS + 1 accept + 1 shared linger = 514} threads at
+     * 256, against {@code 3 * 32 = 96} for the old three-thread relay. The
      * handler threads time out after a minute, so idle bursts do not keep the
      * budget reserved. The ceiling stays fixed: a client cannot make the
      * process create threads without end.
+     *
+     * <p>A desktop browser alone can hold about a hundred keep-alive flows; 128
+     * was reached by Chrome and a handful of tools, so the next refusal hit a
+     * normal desktop. Two threads per connection and a 256 ceiling stay inside
+     * the phone's limits (RLIMIT_NPROC is 61417), while a selector-based relay
+     * that does not need a thread pair per idle flow is the long-term fix.
      */
-    static final int MAX_CONNECTIONS = 128;
+    static final int MAX_CONNECTIONS = 256;
     /**
      * How long the other direction may keep draining after one direction ends.
      * A client that half-closes while the origin keeps the connection alive
