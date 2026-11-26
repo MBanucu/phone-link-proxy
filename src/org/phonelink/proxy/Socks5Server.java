@@ -37,6 +37,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * ({@code ap0}), USB tether ({@code rndis0}) and the AP link ({@code wlan0}),
  * whatever addresses those interfaces get and whenever they appear.
  *
+ * <p>A CONNECT gets {@link #CONNECT_TIMEOUT_MS} (4 s), not 15: a cellular
+ * handshake that is going to fail either fails at once or is lost in the
+ * carrier's NAT, and a lost one surfaces as a timeout. When the upstream
+ * reports that timeout as {@code host unreachable}, the CONNECT is tried once
+ * more with a fresh socket and therefore a fresh source port, which is what
+ * recovers the ~1–4% of new connections that stalled for 5 s (#42). A refused
+ * connection, a DNS failure or a missing cellular network is final and is not
+ * retried. The worst case for one SOCKS CONNECT is
+ * {@code CONNECT_ATTEMPTS × CONNECT_TIMEOUT_MS}.
+ *
  * <p>Deliberately free of Android types: the logger and the upstream are seams,
  * so this class and its tests run on a plain JDK.
  */
@@ -60,7 +70,14 @@ final class Socks5Server implements Closeable {
     private static final int ADDRESS_IPV6 = 0x04;
 
     private static final int HANDSHAKE_TIMEOUT_MS = 30_000;
-    private static final int CONNECT_TIMEOUT_MS = 15_000;
+    /**
+     * One upstream attempt. A lost handshake on the cellular uplink is a
+     * timeout here, and it is better to surface it in 4 s than to make the
+     * page wait out 15 s for a connection that is never going to complete.
+     */
+    private static final int CONNECT_TIMEOUT_MS = 4_000;
+    /** One retry with a fresh socket is enough: a new source port gets a new NAT mapping. */
+    private static final int CONNECT_ATTEMPTS = 2;
 
     /**
      * The default ceiling: how many connections are served at once when nothing
@@ -330,7 +347,7 @@ final class Socks5Server implements Closeable {
                 return;
             }
             try {
-                connected = upstream.connect(request.host, request.port, CONNECT_TIMEOUT_MS);
+                connected = openUpstream(request.host, request.port);
             } catch (Upstream.Failure failure) {
                 log(failure.getMessage());
                 writeReply(out, failure.reply, null);
@@ -354,6 +371,31 @@ final class Socks5Server implements Closeable {
             Closeables.closeQuietly(connected);
             Closeables.closeQuietly(client);
             listener.onClientsChanged(clients.decrementAndGet());
+        }
+    }
+
+    /**
+     * Open the upstream, retrying once when the handshake was lost.
+     *
+     * <p>Only {@code host unreachable} is retried: that is the reply
+     * {@link Egress} uses for a timeout, which on the cellular uplink is the
+     * carrier dropping the handshake's NAT mapping. Each attempt calls
+     * {@link Upstream#connect} afresh, so the retry gets a new socket, a new
+     * source port and therefore a new mapping. A refusal, a DNS failure or a
+     * missing egress network is reported as it is.
+     */
+    private Socket openUpstream(String host, int port) throws Upstream.Failure {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return upstream.connect(host, port, CONNECT_TIMEOUT_MS);
+            } catch (Upstream.Failure failure) {
+                if (attempt >= CONNECT_ATTEMPTS
+                        || failure.reply != REPLY_HOST_UNREACHABLE) {
+                    throw failure;
+                }
+                log("retrying " + host + ":" + port + " after " + CONNECT_TIMEOUT_MS
+                        + " ms: " + failure.getMessage());
+            }
         }
     }
 

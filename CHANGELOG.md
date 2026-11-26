@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A CONNECT whose cellular handshake is lost is retried once with a fresh socket
+  after 4 s instead of waiting out 15 s; a refused connection is not retried. The
+  cellular egress now shares one timeout budget across a host's addresses. This
+  is the ~1–4% of new connections that made pages stall for 5 s (#42).
+
 ## [0.13.0] - 2026-11-26
 
 ### Added

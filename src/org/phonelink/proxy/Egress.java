@@ -44,6 +44,13 @@ final class Egress implements Upstream, Closeable {
     /** Upper bound on waiting for a cellular network to come up, per CONNECT. */
     private static final long AWAIT_MS = 10_000;
 
+    /**
+     * How much of the CONNECT budget is too little to start another address:
+     * less than this and the attempt would only report the deadline as a
+     * timeout of its own.
+     */
+    private static final long MIN_CONNECT_MS = 250;
+
     private final ConnectivityManager manager;
     private final EgressState state = new EgressState();
     private final Handler retries = new Handler(Looper.getMainLooper());
@@ -194,7 +201,11 @@ final class Egress implements Upstream, Closeable {
      *
      * <p>The name is resolved on that network too ({@code Network.getAllByName}):
      * the system resolver would answer over the Wi-Fi link, whose DNS server is
-     * the laptop, which forwards back into this proxy.
+     * the laptop, which forwards back into this proxy. The timeout is one
+     * deadline from the resolve onwards, shared by every resolved address, so a
+     * name with several addresses cannot take {@code N × timeoutMs}. An address
+     * is only started while at least {@link #MIN_CONNECT_MS} of the budget is
+     * left; the first one that connects wins.
      */
     @Override
     public Socket connect(String host, int port, int timeoutMs) throws Failure {
@@ -208,6 +219,7 @@ final class Egress implements Upstream, Closeable {
                     "no usable cellular egress for " + host + ":" + port + ": " + reason);
         }
 
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
         InetAddress[] addresses;
         try {
             addresses = network.getAllByName(host);
@@ -218,10 +230,18 @@ final class Egress implements Upstream, Closeable {
 
         IOException last = null;
         for (InetAddress address : addresses) {
+            long left = deadline - SystemClock.elapsedRealtime();
+            if (left < MIN_CONNECT_MS) {
+                if (last == null) {
+                    last = new SocketTimeoutException(
+                            "the connect budget ran out before " + address.getHostAddress());
+                }
+                break;
+            }
             Socket socket = null;
             try {
                 socket = network.getSocketFactory().createSocket();
-                socket.connect(new InetSocketAddress(address, port), timeoutMs);
+                socket.connect(new InetSocketAddress(address, port), (int) left);
                 socket.setTcpNoDelay(true);
                 return socket;
             } catch (IOException e) {

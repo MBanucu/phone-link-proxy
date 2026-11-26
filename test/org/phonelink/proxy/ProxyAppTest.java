@@ -159,6 +159,34 @@ public final class ProxyAppTest {
             }
         });
 
+        test("a CONNECT lost to a timeout is retried once with a fresh upstream", () -> {
+            try (FlakyUpstream upstream =
+                            new FlakyUpstream(1, Socks5Server.REPLY_HOST_UNREACHABLE);
+                    Fixture fixture = new Fixture(USER, PASSWORD, upstream);
+                    Socket socket = fixture.open()) {
+                connect(socket);
+                assertEqual(2, upstream.attempts.get(), "upstream attempts");
+                // The second attempt's socket is the live one, so the tunnel
+                // works rather than carrying the failed half.
+                socket.getOutputStream().write(0x42);
+                socket.getOutputStream().flush();
+                assertEqual(0x42, readFully(socket.getInputStream(), 1)[0] & 0xFF,
+                        "the retried tunnel relays");
+            }
+        });
+
+        test("a refused CONNECT is reported without a retry", () -> {
+            try (FlakyUpstream upstream = new FlakyUpstream(
+                            Integer.MAX_VALUE, Socks5Server.REPLY_CONNECTION_REFUSED);
+                    Fixture fixture = new Fixture(USER, PASSWORD, upstream);
+                    Socket socket = fixture.open()) {
+                handshake(socket);
+                requestConnect(socket, 0x01, 0x01, "127.0.0.1", 80);
+                assertEqual(Socks5Server.REPLY_CONNECTION_REFUSED, readReply(socket), "reply code");
+                assertEqual(1, upstream.attempts.get(), "upstream attempts");
+            }
+        });
+
         test("clients are counted up and down", () -> {
             try (Fixture fixture = new Fixture()) {
                 Socket socket = fixture.open();
@@ -1415,6 +1443,38 @@ public final class ProxyAppTest {
             } catch (IOException ignored) {
                 // The fixture is done with it.
             }
+        }
+    }
+
+    /**
+     * Fails the first {@code failures} CONNECTs with {@code reply}, then echoes
+     * through a real {@link FakeUpstream}. Counts every attempt, so a test can
+     * tell one attempt from a retry.
+     */
+    private static final class FlakyUpstream implements Upstream, AutoCloseable {
+        private final FakeUpstream delegate;
+        private final int failures;
+        private final int reply;
+        final AtomicInteger attempts = new AtomicInteger();
+
+        FlakyUpstream(int failures, int reply) throws IOException {
+            delegate = new FakeUpstream();
+            this.failures = failures;
+            this.reply = reply;
+        }
+
+        @Override
+        public Socket connect(String host, int port, int timeoutMs) throws Failure {
+            int attempt = attempts.incrementAndGet();
+            if (attempt <= failures) {
+                throw new Failure(reply, "attempt " + attempt + " failed with reply " + reply);
+            }
+            return delegate.connect(host, port, timeoutMs);
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
         }
     }
 
