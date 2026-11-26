@@ -12,9 +12,16 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -53,6 +60,15 @@ final class Socks5Server implements Closeable {
     private static final int HANDSHAKE_TIMEOUT_MS = 30_000;
     private static final int CONNECT_TIMEOUT_MS = 15_000;
 
+    /**
+     * Connections served at once. A handler owns its thread until its tunnel
+     * ends and starts two relay threads of its own, so this is also the bound
+     * on the threads one LAN client can make this process create.
+     */
+    private static final int MAX_CONNECTIONS = 32;
+    /** Accepted clients waiting for a handler; beyond this a connection is refused. */
+    private static final int BACKLOG = 64;
+
     /** Called from connection threads. */
     interface Listener {
         void onClientsChanged(int clients);
@@ -84,10 +100,24 @@ final class Socks5Server implements Closeable {
     private final Listener listener;
     private final Logger logger;
     private final AtomicInteger clients = new AtomicInteger();
-
-    private final ExecutorService handlers = Executors.newCachedThreadPool();
+    /** Accepted and upstream sockets, so close() can end every tunnel. */
+    private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
+    /** Relay threads in flight; close() interrupts them as well as their sockets. */
+    private final Set<Thread> pumps = ConcurrentHashMap.newKeySet();
+    /** Guards close() and what is admitted after it. */
+    private final Object lifecycle = new Object();
+    private final ExecutorService handlers = new ThreadPoolExecutor(
+            MAX_CONNECTIONS, MAX_CONNECTIONS, 0L, TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(BACKLOG),
+            runnable -> {
+                Thread thread = new Thread(runnable, "socks5-handler");
+                thread.setDaemon(true);
+                return thread;
+            });
     private volatile ServerSocket server;
     private volatile boolean running;
+    /** Guarded by {@link #lifecycle}: close() has already run. */
+    private boolean closed;
 
     /** the bound port, or 0 when the server is not listening */
     int port() {
@@ -121,33 +151,97 @@ final class Socks5Server implements Closeable {
     /** Bind and start accepting. Throws if the port is taken. */
     void start() throws IOException {
         ServerSocket socket = new ServerSocket();
-        socket.setReuseAddress(true);
-        socket.bind(new InetSocketAddress(port), 50);
-        server = socket;
-        running = true;
+        try {
+            socket.setReuseAddress(true);
+            socket.bind(new InetSocketAddress(port), 50);
+        } catch (IOException e) {
+            // A failed bind is not a reason to leak the descriptor.
+            Closeables.closeQuietly(socket);
+            throw e;
+        }
+        synchronized (lifecycle) {
+            if (closed) {
+                Closeables.closeQuietly(socket);
+                throw new IOException("the server is already closed");
+            }
+            server = socket;
+            running = true;
+        }
         Thread acceptor = new Thread(this::acceptLoop, "socks5-accept");
         acceptor.setDaemon(true);
         acceptor.start();
     }
 
     private void acceptLoop() {
-        while (running) {
+        while (true) {
+            ServerSocket listening;
+            synchronized (lifecycle) {
+                if (closed || !running) {
+                    return;
+                }
+                listening = server;
+            }
+            // close() may have cleared it between the check and the read.
+            if (listening == null) {
+                return;
+            }
             Socket client;
             try {
-                client = server.accept();
+                client = listening.accept();
             } catch (IOException e) {
-                if (running) {
+                // A closed listening socket is how a stop looks; anything else
+                // is a listener that cannot accept any more either.
+                if (!closed) {
                     log("accept failed: " + e.getMessage());
-                    continue;
+                }
+                return;
+            } catch (RuntimeException e) {
+                if (!closed) {
+                    log("accept failed: " + e);
                 }
                 return;
             }
-            handlers.execute(() -> handle(client));
+            if (!track(client)) {
+                Closeables.closeQuietly(client);
+                return;
+            }
+            try {
+                handlers.execute(() -> handle(client));
+            } catch (RejectedExecutionException e) {
+                // Bounded on purpose: refusing a client beats exhausting the
+                // process with threads a LAN client asked for.
+                untrack(client);
+                Closeables.closeQuietly(client);
+                log("refused a client: too many connections");
+            }
         }
     }
 
+    /** Admit a socket to the set close() closes, or refuse it after a close. */
+    private boolean track(Socket socket) {
+        synchronized (lifecycle) {
+            if (closed) {
+                return false;
+            }
+            sockets.add(socket);
+            return true;
+        }
+    }
+
+    private void untrack(Socket socket) {
+        sockets.remove(socket);
+    }
+
     private void handle(Socket client) {
-        int count = clients.incrementAndGet();
+        int count;
+        synchronized (lifecycle) {
+            if (closed) {
+                sockets.remove(client);
+                Closeables.closeQuietly(client);
+                return;
+            }
+            count = clients.incrementAndGet();
+        }
         listener.onClientsChanged(count);
         Socket connected = null;
         try {
@@ -174,12 +268,21 @@ final class Socks5Server implements Closeable {
                 writeReply(out, failure.reply, null);
                 return;
             }
+            // The upstream half is a tunnel too: a stop has to close it.
+            if (!track(connected)) {
+                Closeables.closeQuietly(connected);
+                return;
+            }
             writeReply(out, REPLY_SUCCEEDED, connected);
             client.setSoTimeout(0);
             relay(client, connected);
         } catch (IOException e) {
             log("connection ended: " + e.getMessage());
         } finally {
+            untrack(client);
+            if (connected != null) {
+                untrack(connected);
+            }
             Closeables.closeQuietly(connected);
             Closeables.closeQuietly(client);
             listener.onClientsChanged(clients.decrementAndGet());
@@ -336,18 +439,56 @@ final class Socks5Server implements Closeable {
                 Closeables.closeQuietly(from);
                 Closeables.closeQuietly(to);
             } finally {
+                pumps.remove(Thread.currentThread());
                 done.countDown();
             }
         }, "socks5-relay");
         thread.setDaemon(true);
+        synchronized (lifecycle) {
+            if (closed) {
+                // The tunnel is already ending; do not create a thread that
+                // would only block on a socket close() has closed.
+                done.countDown();
+                return;
+            }
+            pumps.add(thread);
+        }
         thread.start();
     }
 
+    /**
+     * Stop listening and end every tunnel this server owns.
+     *
+     * <p>Idempotent: the second call finds the listening socket gone and does
+     * nothing. The accepted and upstream sockets are closed first, which
+     * unblocks the relay reads, and the pump threads are interrupted as a
+     * second way out for anything not blocked on a socket.
+     */
     @Override
     public void close() {
-        running = false;
-        Closeables.closeQuietly(server);
-        server = null;
+        ServerSocket listening;
+        List<Socket> tunnels;
+        List<Thread> relays;
+        synchronized (lifecycle) {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            running = false;
+            listening = server;
+            server = null;
+            tunnels = new ArrayList<>(sockets);
+            sockets.clear();
+            relays = new ArrayList<>(pumps);
+            pumps.clear();
+        }
+        Closeables.closeQuietly(listening);
+        for (Socket socket : tunnels) {
+            Closeables.closeQuietly(socket);
+        }
+        for (Thread relay : relays) {
+            relay.interrupt();
+        }
         handlers.shutdownNow();
     }
 }

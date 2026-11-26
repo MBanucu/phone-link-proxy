@@ -6,8 +6,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -170,6 +172,47 @@ public final class ProxyAppTest {
                     Thread.sleep(20);
                 }
                 assertEqual(0, fixture.clients.get(), "connected clients after close");
+            }
+        });
+
+        test("closing the server ends an established tunnel, stops accepting and is idempotent", () -> {
+            Fixture fixture = new Fixture();
+            try {
+                Socket socket = fixture.open();
+                try {
+                    handshake(socket);
+                    requestConnect(socket, 0x01, 0x01, "127.0.0.1", 80);
+                    assertEqual(0x00, readReply(socket), "reply code");
+
+                    fixture.server.close();
+                    assertClosed(socket, "the established tunnel is closed");
+                    assertEqual(0, waitForClients(fixture.clients), "clients after stop");
+
+                    // The second close is a no-op, not another shutdown.
+                    fixture.server.close();
+
+                    Socket late = new Socket();
+                    try {
+                        late.connect(new InetSocketAddress("127.0.0.1", fixture.port), 500);
+                        throw new AssertionError("a stopped server accepted a connection");
+                    } catch (IOException expected) {
+                        // Refused: the accept loop stopped with the listener.
+                    } finally {
+                        Closeables.closeQuietly(late);
+                    }
+                } finally {
+                    socket.close();
+                }
+            } finally {
+                fixture.close();
+            }
+        });
+
+        test("a client that has not handshaken is closed when the server stops", () -> {
+            try (Fixture fixture = new Fixture(); Socket socket = fixture.open()) {
+                fixture.server.close();
+                assertClosed(socket, "the accepted socket is closed");
+                fixture.server.close();
             }
         });
 
@@ -850,6 +893,28 @@ public final class ProxyAppTest {
         if (!expected.equals(actual)) {
             throw new AssertionError(what + ": expected \"" + expected + "\" but was \"" + actual + "\"");
         }
+    }
+
+    /** Read until the peer closes; a reset is just as closed as end-of-stream. */
+    private static void assertClosed(Socket socket, String what) {
+        int read;
+        try {
+            read = socket.getInputStream().read();
+        } catch (SocketTimeoutException e) {
+            throw new AssertionError(what + ": still open", e);
+        } catch (IOException e) {
+            return;
+        }
+        assertEqual(-1, read, what);
+    }
+
+    /** The count a connection-thread callback settles on, or the last one seen. */
+    private static int waitForClients(AtomicInteger clients) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + TIMEOUT_MS;
+        while (clients.get() != 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        return clients.get();
     }
 
     private static void assertRejected(String what, Runnable action) {

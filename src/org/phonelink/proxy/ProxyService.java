@@ -76,6 +76,13 @@ public final class ProxyService extends Service implements Port.Host {
     private boolean startedBefore;
     /** Wireless debugging is a switch of the whole app, and one start is enough. */
     private boolean adbTouched;
+    /**
+     * Set before the ports are closed in {@link #onDestroy}. A connection
+     * thread can still be finishing a tunnel, and its last callback must not
+     * reacquire a lock, re-post a notification, or publish a listener that is
+     * gone.
+     */
+    private volatile boolean destroyed;
 
     @Override
     public void onCreate() {
@@ -138,19 +145,21 @@ public final class ProxyService extends Service implements Port.Host {
                 : renaming ? "renaming" : "starting");
         if (stopping) {
             stopRequested(intent);
-            return START_NOT_STICKY;
+            // A stop of one listener beside others leaves a service that is
+            // still somebody's uplink and must come back if the system kills it.
+            return stickiness();
         }
         if (saving) {
             saveCurrent(intent, first);
-            return START_NOT_STICKY;
+            return stickiness();
         }
         if (deleting) {
             deleteSaved(intent, first);
-            return START_NOT_STICKY;
+            return stickiness();
         }
         if (renaming) {
             renameSaved(intent, first);
-            return START_NOT_STICKY;
+            return stickiness();
         }
         if (!foreground) {
             // Starting from the shade or at boot needs location "all the time";
@@ -175,7 +184,15 @@ public final class ProxyService extends Service implements Port.Host {
                 ? ConfigStore.profileMatching(this, config)
                 : profile.trim();
         start(profile, config);
-        return START_STICKY;
+        return stickiness();
+    }
+
+    /**
+     * What to tell the system when an action returns: keep the service while a
+     * listener remains, and let it go only when nothing is running at all.
+     */
+    private int stickiness() {
+        return ports.isEmpty() ? START_NOT_STICKY : START_STICKY;
     }
 
     /**
@@ -220,13 +237,22 @@ public final class ProxyService extends Service implements Port.Host {
 
     @Override
     public void onDestroy() {
+        // Before the ports: closing a tunnel wakes its connection thread, whose
+        // last clientsChanged() must not touch the locks or the shade again.
+        destroyed = true;
         // Closing the last port closes the egress with it.
         ports.stop(null, false, 0);
+        // A client connected when the stop arrived would otherwise leave the
+        // partial wake lock held until the process dies.
+        holdWakeLock(false);
+        // With no ports and destroyed set, this releases the Wi-Fi lock if it
+        // was held; a late changed() cannot reacquire it.
         updateWifiLock();
         closeEgress();
         // Nothing that happens after this is about the listeners that just went.
         EventLog.setActiveTag(null);
-        publishAll();
+        // publishAll() is a no-op now, but the panel still has to be emptied.
+        ProxyRuntime.publish(new ArrayList<>());
         stopForeground(STOP_FOREGROUND_REMOVE);
         notifications.cancel(NOTIFICATION_ID);
         super.onDestroy();
@@ -318,7 +344,7 @@ public final class ProxyService extends Service implements Port.Host {
 
     @Override
     public Upstream upstream() {
-        if (egress == null) {
+        if (egress == null && !destroyed) {
             egress = new Egress(this);
             egress.start();
         }
@@ -332,6 +358,9 @@ public final class ProxyService extends Service implements Port.Host {
      */
     @Override
     public void uplinkUp(Port port) {
+        if (destroyed) {
+            return;
+        }
         if (!adbTouched && ConfigStore.adbWireless(this)) {
             adbTouched = true;
             boolean wasOff = !AdbWireless.on(this);
@@ -344,13 +373,25 @@ public final class ProxyService extends Service implements Port.Host {
         }
     }
 
+    /**
+     * Serialised with itself so the count is read while no other connection
+     * callback is changing it: the last disconnect cannot be seen as zero just
+     * as a new client arrives, and a client still connected cannot have the
+     * lock released under it.
+     */
     @Override
-    public void clientsChanged() {
+    public synchronized void clientsChanged() {
+        if (destroyed) {
+            return;
+        }
         holdWakeLock(ports.totalClients() > 0);
     }
 
     @Override
     public void changed() {
+        if (destroyed) {
+            return;
+        }
         // A port binds or pauses here, and a connection thread calls this with
         // the last client; both can change whether a Wi-Fi lock is wanted.
         updateWifiLock();
@@ -363,6 +404,9 @@ public final class ProxyService extends Service implements Port.Host {
      */
     @Override
     public void failed(Port port, String message) {
+        if (destroyed) {
+            return;
+        }
         Log.e(TAG, message);
         EventLog.addTo(port.name(), "failed: " + message);
         notifyError(message);
@@ -439,7 +483,7 @@ public final class ProxyService extends Service implements Port.Host {
         }
     }
 
-    private void holdWakeLock(boolean held) {
+    private synchronized void holdWakeLock(boolean held) {
         if (held && !wakeLock.isHeld()) {
             // Only while somebody is actually using a tunnel: a lock held for
             // the lifetime of the service is the battery cost this app exists
@@ -478,7 +522,10 @@ public final class ProxyService extends Service implements Port.Host {
             listeners.add(new WifiLockPolicy.Listener(
                     each.state().listening, each.config().anyNetwork));
         }
-        boolean wanted = WifiLockPolicy.hold(ConfigStore.wifiLock(this), listeners);
+        // Destroyed means the listeners just went; this call releases the lock
+        // rather than letting a late callback put it back.
+        boolean wanted = !destroyed
+                && WifiLockPolicy.hold(ConfigStore.wifiLock(this), listeners);
         if (wifiLock == null) {
             if (wanted && !wifiLockWarned) {
                 wifiLockWarned = true;
@@ -614,6 +661,9 @@ public final class ProxyService extends Service implements Port.Host {
 
     /** Share every listener's state with the panel, the shade and the Log page. */
     private void publishAll() {
+        if (destroyed) {
+            return;
+        }
         List<ProxyRuntime.Proxy> view = new ArrayList<>();
         for (Port each : ports.all()) {
             view.add(new ProxyRuntime.Proxy(each.state(), each.traffic()));
@@ -633,6 +683,9 @@ public final class ProxyService extends Service implements Port.Host {
     }
 
     private void notifyError(String message) {
+        if (destroyed) {
+            return;
+        }
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_stat_proxy)
                 .setContentTitle(getString(R.string.app_name))
