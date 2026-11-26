@@ -245,13 +245,37 @@ public final class ProxyAppTest {
                     "anonymous summary");
         });
 
+        test("the Wi-Fi lock follows a bound listener that needs Wi-Fi", () -> {
+            assertTrue(WifiLockPolicy.hold(true,
+                    List.of(new WifiLockPolicy.Listener(true, false))),
+                    "a listening Wi-Fi proxy holds it");
+            assertFalse(WifiLockPolicy.hold(false,
+                    List.of(new WifiLockPolicy.Listener(true, false))),
+                    "the switch off releases it");
+            assertFalse(WifiLockPolicy.hold(true,
+                    List.of(new WifiLockPolicy.Listener(false, false))),
+                    "a paused proxy does not hold it");
+            assertFalse(WifiLockPolicy.hold(true,
+                    List.of(new WifiLockPolicy.Listener(true, true))),
+                    "an any_network proxy does not need it");
+            assertTrue(WifiLockPolicy.hold(true, List.of(
+                    new WifiLockPolicy.Listener(true, true),
+                    new WifiLockPolicy.Listener(true, false))),
+                    "one Wi-Fi listener is enough");
+            assertFalse(WifiLockPolicy.hold(true, List.of()),
+                    "no listeners, no lock");
+        });
+
         test("the help text an agent reads names the whole adb contract", () -> {
             String text = Help.text("org.phonelink.proxy");
             for (String extra : List.of("--ei port", "--es user", "--es password",
                     "--es ssid", "--ez anonymous", "--ez any_network",
-                    "--ez auto_start", "--ez adb_wifi", "--es profile")) {
+                    "--ez auto_start", "--ez wifi_lock", "--ez adb_wifi",
+                    "--es profile")) {
                 assertTrue(text.contains(extra), "help does not mention " + extra);
             }
+            assertTrue(text.contains("opt-in experiment"),
+                    "the help text sells the Wi-Fi lock as a fix");
             assertTrue(text.contains("org.phonelink.proxy.action.START"), "no start action");
             assertTrue(text.contains("org.phonelink.proxy.action.STOP"), "no stop action");
             assertTrue(text.contains("org.phonelink.proxy.action.SAVE_PROFILE"),
@@ -619,6 +643,7 @@ public final class ProxyAppTest {
             laptop.config = ProxyConfig.raw(1081, "proxy", "s3cret", "PhoneLink", true, false);
             laptop.autoStart = true;
             laptop.adbWireless = false;
+            laptop.wifiLock = true;
             laptop.tile = true;
             document.saved.add(laptop);
             ProfileDocument.Entry hotel = new ProfileDocument.Entry();
@@ -640,6 +665,7 @@ public final class ProxyAppTest {
             assertTrue(first.config.anyNetwork, "any network");
             assertTrue(first.autoStart, "auto start");
             assertFalse(first.adbWireless, "adb wifi");
+            assertTrue(first.wifiLock, "wifi lock");
             assertTrue(first.tile, "tile");
             ProfileDocument.Entry second = read.saved.get(1);
             assertEqual("hotel \"the\" \\ one", second.name, "an escaped name");
@@ -670,6 +696,7 @@ public final class ProxyAppTest {
             assertEqual(ProxyConfig.DEFAULT_SSID, entry.config.ssid, "ssid");
             assertTrue(entry.adbWireless, "the wireless-debugging switch defaults on");
             assertFalse(entry.autoStart, "auto start");
+            assertFalse(entry.wifiLock, "the Wi-Fi lock defaults off");
             assertTrue(document.active == null, "no configuration in use");
         });
 

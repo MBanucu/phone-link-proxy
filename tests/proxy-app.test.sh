@@ -34,6 +34,7 @@ sources=(
   "$ROOT/src/org/phonelink/proxy/TileCycle.java"
   "$ROOT/src/org/phonelink/proxy/TilePlan.java"
   "$ROOT/src/org/phonelink/proxy/TileScope.java"
+  "$ROOT/src/org/phonelink/proxy/WifiLockPolicy.java"
   "$ROOT/src/org/phonelink/proxy/Socks5Server.java"
   "$ROOT/src/org/phonelink/proxy/Traffic.java"
   "$ROOT/src/org/phonelink/proxy/ProfileDocument.java"
