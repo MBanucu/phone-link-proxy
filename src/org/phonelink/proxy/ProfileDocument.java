@@ -110,6 +110,7 @@ final class ProfileDocument {
     private static String writeEntry(Entry entry) {
         return "{\"name\": " + quote(entry.name)
                 + ", \"port\": " + entry.config.port
+                + ", \"max_connections\": " + entry.config.maxConnections
                 + ", \"user\": " + quote(entry.config.user)
                 + ", \"password\": " + quote(entry.config.password)
                 + ", \"ssid\": " + quote(entry.config.ssid)
@@ -163,7 +164,9 @@ final class ProfileDocument {
                 string(object.get("password"), ""),
                 string(object.get("ssid"), ProxyConfig.DEFAULT_SSID),
                 flag(object.get("any_network")),
-                flag(object.get("anonymous")));
+                flag(object.get("anonymous")),
+                (int) number(object.get("max_connections"),
+                        ProxyConfig.DEFAULT_MAX_CONNECTIONS));
         entry.autoStart = flag(object.get("auto_start"));
         entry.adbWireless = object.containsKey("adb_wifi")
                 ? flag(object.get("adb_wifi"))

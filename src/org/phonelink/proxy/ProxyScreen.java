@@ -61,6 +61,7 @@ final class ProxyScreen {
     private final View servicePage;
     private final View logPage;
     private final EditText port;
+    private final EditText maxConnections;
     private final EditText user;
     private final EditText password;
     private final EditText ssid;
@@ -120,6 +121,7 @@ final class ProxyScreen {
         servicePage = screen.findViewById(R.id.page_service);
         logPage = screen.findViewById(R.id.page_log);
         port = screen.findViewById(R.id.port);
+        maxConnections = screen.findViewById(R.id.max_connections);
         user = screen.findViewById(R.id.user);
         password = screen.findViewById(R.id.password);
         ssid = screen.findViewById(R.id.ssid);
@@ -185,6 +187,7 @@ final class ProxyScreen {
         loading = true;
         try {
             port.setText(Integer.toString(config.port));
+            maxConnections.setText(Integer.toString(config.maxConnections));
             user.setText(config.user);
             password.setText(config.password);
             ssid.setText(config.ssid);
@@ -413,7 +416,8 @@ final class ProxyScreen {
                 password.getText().toString(),
                 ssid.getText().toString(),
                 anyNetwork.isChecked(),
-                anonymous.isChecked());
+                anonymous.isChecked(),
+                readMaxConnections());
     }
 
     /** The port the form would start on, for a footer that has to name it. */
@@ -435,6 +439,7 @@ final class ProxyScreen {
         String userNow = anonymousNow ? "" : user.getText().toString();
         String passwordNow = anonymousNow ? "" : password.getText().toString();
         return readPortOr(-1) != stored.port
+                || readMaxConnectionsOr(-1) != stored.maxConnections
                 || !userNow.equals(stored.user)
                 || !passwordNow.equals(stored.password)
                 || !ssid.getText().toString().equals(stored.ssid)
@@ -468,6 +473,7 @@ final class ProxyScreen {
             }
         };
         port.addTextChangedListener(watcher);
+        maxConnections.addTextChangedListener(watcher);
         user.addTextChangedListener(watcher);
         password.addTextChangedListener(watcher);
         ssid.addTextChangedListener(watcher);
@@ -505,6 +511,23 @@ final class ProxyScreen {
     private int readPortOr(int fallback) {
         try {
             return Integer.parseInt(port.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private int readMaxConnections() {
+        try {
+            return Integer.parseInt(maxConnections.getText().toString().trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("max_connections must be a number");
+        }
+    }
+
+    /** The field as an int, or `fallback` while it is not a number at all. */
+    private int readMaxConnectionsOr(int fallback) {
+        try {
+            return Integer.parseInt(maxConnections.getText().toString().trim());
         } catch (NumberFormatException e) {
             return fallback;
         }

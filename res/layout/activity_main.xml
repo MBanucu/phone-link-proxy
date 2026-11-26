@@ -197,6 +197,23 @@
                         <LinearLayout style="@style/FieldLabelRow">
                             <TextView
                                 style="@style/FieldLabel"
+                                android:labelFor="@+id/max_connections"
+                                android:text="@string/label_max_connections" />
+                            <ImageButton
+                                android:id="@+id/info_max_connections"
+                                style="@style/InfoMark" />
+                        </LinearLayout>
+
+                        <EditText
+                            android:id="@+id/max_connections"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:autofillHints=""
+                            android:inputType="number" />
+
+                        <LinearLayout style="@style/FieldLabelRow">
+                            <TextView
+                                style="@style/FieldLabel"
                                 android:labelFor="@+id/user"
                                 android:text="@string/label_user" />
                             <ImageButton

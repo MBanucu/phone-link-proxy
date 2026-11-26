@@ -32,6 +32,7 @@ final class ConfigStore {
     static final String EXTRA_ANONYMOUS = "anonymous";
     static final String EXTRA_SSID = "ssid";
     static final String EXTRA_ANY_NETWORK = "any_network";
+    static final String EXTRA_MAX_CONNECTIONS = "max_connections";
     static final String EXTRA_AUTO_START = "auto_start";
     static final String EXTRA_ADB_WIFI = "adb_wifi";
     static final String EXTRA_WIFI_LOCK = "wifi_lock";
@@ -47,6 +48,7 @@ final class ConfigStore {
     private static final String KEY_ANONYMOUS = "anonymous";
     private static final String KEY_SSID = "ssid";
     private static final String KEY_ANY_NETWORK = "any_network";
+    private static final String KEY_MAX_CONNECTIONS = "max_connections";
     // Package-private so the panel can follow a preference that adb changed
     // while it is open, through a shared-preferences listener.
     static final String KEY_AUTO_START = "auto_start";
@@ -146,6 +148,7 @@ final class ConfigStore {
         text.append("adb_wifi ").append(adbWireless(context)).append('\n');
         text.append("wifi_lock ").append(wifiLock(context)).append('\n');
         text.append("port ").append(config.port).append('\n');
+        text.append("max_connections ").append(config.maxConnections).append('\n');
         text.append("ssid ").append(config.ssid).append('\n');
         text.append("any_network ").append(config.anyNetwork).append('\n');
         text.append("in_use ").append(inUse == null ? "" : inUse).append('\n');
@@ -199,7 +202,8 @@ final class ConfigStore {
                 prefs.getString(KEY_PASSWORD, ""),
                 prefs.getString(KEY_SSID, ProxyConfig.DEFAULT_SSID),
                 prefs.getBoolean(KEY_ANY_NETWORK, false),
-                prefs.getBoolean(KEY_ANONYMOUS, false));
+                prefs.getBoolean(KEY_ANONYMOUS, false),
+                prefs.getInt(KEY_MAX_CONNECTIONS, ProxyConfig.DEFAULT_MAX_CONNECTIONS));
     }
 
     static void save(Context context, ProxyConfig config) {
@@ -211,6 +215,7 @@ final class ConfigStore {
                 .putBoolean(KEY_ANONYMOUS, config.anonymous)
                 .putString(KEY_SSID, config.ssid)
                 .putBoolean(KEY_ANY_NETWORK, config.anyNetwork)
+                .putInt(KEY_MAX_CONNECTIONS, config.maxConnections)
                 .apply();
         publishState(context);
     }
@@ -248,7 +253,9 @@ final class ConfigStore {
                 prefs.getString(profileKey(name, KEY_PASSWORD), ""),
                 prefs.getString(profileKey(name, KEY_SSID), ProxyConfig.DEFAULT_SSID),
                 prefs.getBoolean(profileKey(name, KEY_ANY_NETWORK), false),
-                prefs.getBoolean(profileKey(name, KEY_ANONYMOUS), false));
+                prefs.getBoolean(profileKey(name, KEY_ANONYMOUS), false),
+                prefs.getInt(profileKey(name, KEY_MAX_CONNECTIONS),
+                        ProxyConfig.DEFAULT_MAX_CONNECTIONS));
     }
 
     static void saveProfile(
@@ -269,6 +276,7 @@ final class ConfigStore {
                 .putBoolean(profileKey(name, KEY_ANONYMOUS), config.anonymous)
                 .putString(profileKey(name, KEY_SSID), config.ssid)
                 .putBoolean(profileKey(name, KEY_ANY_NETWORK), config.anyNetwork)
+                .putInt(profileKey(name, KEY_MAX_CONNECTIONS), config.maxConnections)
                 .putBoolean(profileKey(name, KEY_AUTO_START), autoStart)
                 .putBoolean(profileKey(name, KEY_ADB_WIFI), adbWireless)
                 .putBoolean(profileKey(name, KEY_WIFI_LOCK), wifiLock)
@@ -390,6 +398,7 @@ final class ConfigStore {
                 .remove(profileKey(name, KEY_ANONYMOUS))
                 .remove(profileKey(name, KEY_SSID))
                 .remove(profileKey(name, KEY_ANY_NETWORK))
+                .remove(profileKey(name, KEY_MAX_CONNECTIONS))
                 .remove(profileKey(name, KEY_AUTO_START))
                 .remove(profileKey(name, KEY_ADB_WIFI))
                 .remove(profileKey(name, KEY_WIFI_LOCK))
@@ -516,7 +525,8 @@ final class ConfigStore {
                     && saved.password.equals(config.password)
                     && saved.ssid.equals(config.ssid)
                     && saved.anyNetwork == config.anyNetwork
-                    && saved.anonymous == config.anonymous) {
+                    && saved.anonymous == config.anonymous
+                    && saved.maxConnections == config.maxConnections) {
                 return name;
             }
         }
@@ -557,6 +567,7 @@ final class ConfigStore {
         String ssid = stored.ssid;
         boolean anyNetwork = stored.anyNetwork;
         boolean anonymous = stored.anonymous;
+        int maxConnections = stored.maxConnections;
 
         if (intent != null && intent.hasExtra(EXTRA_AUTO_START)) {
             setAutoStart(context, intent.getBooleanExtra(EXTRA_AUTO_START, autoStart(context)));
@@ -589,9 +600,13 @@ final class ConfigStore {
             if (intent.hasExtra(EXTRA_ANONYMOUS)) {
                 anonymous = intent.getBooleanExtra(EXTRA_ANONYMOUS, anonymous);
             }
+            if (intent.hasExtra(EXTRA_MAX_CONNECTIONS)) {
+                maxConnections = intent.getIntExtra(EXTRA_MAX_CONNECTIONS, maxConnections);
+            }
         }
 
-        ProxyConfig config = ProxyConfig.of(port, user, password, ssid, anyNetwork, anonymous);
+        ProxyConfig config = ProxyConfig.of(port, user, password, ssid, anyNetwork, anonymous,
+                maxConnections);
         save(context, config);
         return config;
     }

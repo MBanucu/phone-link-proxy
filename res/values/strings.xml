@@ -71,6 +71,7 @@
     <string name="error_profile_exists">a configuration called \"%1$s\" already exists</string>
     <string name="error_background_start">the phone refused a background start: set Location to \"Allow all the time\" for this app, or open the app and press Start</string>
     <string name="label_port">Port</string>
+    <string name="label_max_connections">Max connections</string>
     <string name="label_user">User</string>
     <string name="label_password">Password</string>
     <string name="label_ssid">SSID the listener may run on</string>
@@ -111,6 +112,8 @@
     <!-- What each mark explains, in the order the controls appear. -->
     <string name="info_port_title">Port</string>
     <string name="info_port">The TCP port this proxy listens on. 1080 is the SOCKS convention; two running proxies need two ports. The laptop points at this port on the phone\'s address.</string>
+    <string name="info_max_connections_title">Max connections</string>
+    <string name="info_max_connections">How many SOCKS connections this proxy may have open at once: 16 to 1024, 256 by default. Each live connection costs two threads, so a higher ceiling spends memory and CPU. Raise it when a desktop browser fills the listener and requests start failing. The selector-based relay that removes the thread cost is tracked separately (#37).</string>
     <string name="info_user_title">User</string>
     <string name="info_user">The SOCKS5 user name the laptop sends. It is stored with this proxy and never shown in dumpsys or the log; the password is the only secret.</string>
     <string name="info_password_title">Password</string>
