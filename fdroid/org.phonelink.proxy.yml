@@ -14,8 +14,6 @@ Builds:
     commit: 6ff3a1f445ebe8f91cc76759f28a7c1bd18b3d0d
     output: build/phone-link-proxy.apk
     prebuild: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-    scandelete:
-      - debug.keystore
     build: ./build.sh
 
 AutoUpdateMode: None
