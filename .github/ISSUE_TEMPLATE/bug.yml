@@ -1,0 +1,54 @@
+name: Bug report
+description: The app, the proxy, the panel or the build does not behave as documented
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Problems with the NixOS module, the scripts or the access point belong in
+        [phone-link](https://github.com/MBanucu/phone-link/issues).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, and what the app or the build did instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the problem, including the build or install command.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Proxy version (from the panel or `version`), phone model, Android version and how it was installed.
+      placeholder: 0.10.0, Pixel 7, Android 15, installed from a release APK
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Logcat lines, the build output or a screenshot. Remove secrets and addresses you do not want public.
+      render: shell
+    validations:
+      required: false
