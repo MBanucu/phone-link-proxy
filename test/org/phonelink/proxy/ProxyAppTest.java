@@ -118,6 +118,43 @@ public final class ProxyAppTest {
             }
         });
 
+        // A plain close leaves FIN_WAIT1 behind when the peer has gone, and a
+        // SYN that later lands on that orphan is blackholed. The bounded close
+        // must still deliver everything that was written before it.
+        test("a bounded close delivers the bytes and the end of stream", () -> {
+            try (ServerSocket listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                 Socket reader = new Socket()) {
+                reader.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),
+                        listener.getLocalPort()), TIMEOUT_MS);
+                reader.setSoTimeout(TIMEOUT_MS);
+                Socket writer = listener.accept();
+                writer.getOutputStream().write("done".getBytes(StandardCharsets.UTF_8));
+                writer.getOutputStream().flush();
+                long start = System.nanoTime();
+                Closeables.closeBoundedQuietly(writer);
+                long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+                assertTrue(writer.isClosed(), "writer not closed");
+                assertTrue(elapsedMs <= 2_000, "bounded close blocked for " + elapsedMs + " ms");
+                assertEqual("done", new String(readFully(reader.getInputStream(), 4),
+                        StandardCharsets.UTF_8), "bytes written before the close");
+                assertEqual(-1, reader.getInputStream().read(), "end of stream");
+            }
+        });
+
+        test("a reset close frees the socket at once", () -> {
+            try (ServerSocket listener = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                 Socket reader = new Socket()) {
+                reader.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),
+                        listener.getLocalPort()), TIMEOUT_MS);
+                Socket writer = listener.accept();
+                long start = System.nanoTime();
+                Closeables.resetQuietly(writer);
+                long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+                assertTrue(writer.isClosed(), "writer not closed");
+                assertTrue(elapsedMs <= 500, "reset blocked for " + elapsedMs + " ms");
+            }
+        });
+
         test("a domain name reaches the upstream unresolved", () -> {
             try (Fixture fixture = new Fixture(); Socket socket = fixture.open()) {
                 handshake(socket);
