@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-26
+
 ### Added
 
 - An opt-in `wifi_lock` experiment for the access point that drops a phone
@@ -29,6 +31,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that says why `debug.keystore` is scandeleted, why the commit is a full hash
   and why each release is a hand-added `Builds` block. Submitting it needs a
   GitLab account.
+
+### Changed
+
+- The Wi-Fi gate follows the network that actually matches the configured SSID.
+  The service keeps a map of connected Wi-Fi networks from the connectivity
+  callbacks instead of calling `getAllNetworks()` inside them, uses
+  `FLAG_INCLUDE_LOCATION_INFO` on Android 12+, pauses when more than one
+  network matches, and re-checks the gate immediately when the user unlocks.
+- A release is published only when its tag names `version`, the flake checks
+  pass, and (when `ANDROID_CERT_SHA256` is set) the APK carries the expected
+  release certificate.
+
+### Fixed
+
+- Stopping a listener closes its accepted client sockets and relay pumps, not
+  just the listening socket. Active tunnels end, and late callbacks cannot
+  re-post a notification after the service is gone.
+- The partial wake lock and the Wi-Fi lock are released in `onDestroy`, and the
+  client count is synchronized so a stop cannot release a wake lock while a
+  client is still connected.
+- `Socks5Server` closes the socket when `bind()` fails, and the accept loop no
+  longer has a null-server race. The relay pool is bounded at 32 concurrent
+  connections.
+- `Egress` retries a cellular request after `onUnavailable` and reports loss of
+  the validated network instead of waiting forever.
+- The tracked `debug.keystore` is gone; `build.sh` generates a per-checkout dev
+  key under `build/` and preserves it across rebuilds.
 
 ## [0.11.1] - 2026-11-17
 

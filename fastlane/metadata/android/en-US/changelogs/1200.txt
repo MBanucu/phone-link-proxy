@@ -1,0 +1,4 @@
+Adds an opt-in Wi-Fi lock experiment for an access point with no uplink,
+tracks the actual Wi-Fi network and rechecks the SSID after unlock, closes
+established tunnels cleanly when a listener stops, and hardens releases.
+The Wi-Fi lock is off by default.
