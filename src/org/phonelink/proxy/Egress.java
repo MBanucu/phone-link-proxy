@@ -6,6 +6,8 @@ import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 
@@ -27,6 +29,13 @@ import java.net.UnknownHostException;
  * The app this replaces (5GProxy) holds an active {@code NetworkRequest} for
  * {@code TRANSPORT_CELLULAR} and binds its egress to the result, which is what
  * makes the tunnel leave the phone at all; this class does the same.
+ *
+ * <p>A request made before mobile data exists — at boot, in airplane mode, while
+ * the cellular link is down — is answered once with {@code onUnavailable} and
+ * then stops. The request is therefore made again with a bounded backoff while
+ * the service runs, and again when the network is lost or stops carrying the
+ * internet. {@link EgressState} holds that schedule; this class only turns its
+ * transitions into {@code ConnectivityManager} calls.
  */
 final class Egress implements Upstream, Closeable {
 
@@ -36,17 +45,39 @@ final class Egress implements Upstream, Closeable {
     private static final long AWAIT_MS = 10_000;
 
     private final ConnectivityManager manager;
+    private final EgressState state = new EgressState();
+    private final Handler retries = new Handler(Looper.getMainLooper());
     private final Object lock = new Object();
 
     private Network cellular;
-    private boolean requested;
+
+    /** Request again after the backoff; a close or an available network cancels it. */
+    private final Runnable retry = new Runnable() {
+        @Override
+        public void run() {
+            synchronized (lock) {
+                if (state.retryReady(SystemClock.elapsedRealtime())) {
+                    requestLocked();
+                }
+            }
+        }
+    };
 
     private final ConnectivityManager.NetworkCallback callback =
             new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onAvailable(Network network) {
+                    boolean carriesInternet = usable(manager.getNetworkCapabilities(network));
                     synchronized (lock) {
                         cellular = network;
+                        if (carriesInternet) {
+                            state.available();
+                        } else {
+                            // It is a cellular network, but validation may still
+                            // be in flight; do not restart the backoff for it.
+                            state.present();
+                        }
+                        retries.removeCallbacks(retry);
                         lock.notifyAll();
                     }
                 }
@@ -54,15 +85,43 @@ final class Egress implements Upstream, Closeable {
                 @Override
                 public void onLost(Network network) {
                     synchronized (lock) {
-                        if (network.equals(cellular)) {
-                            cellular = null;
+                        if (!network.equals(cellular)) {
+                            return;
                         }
+                        cellular = null;
+                        scheduleLocked(state.lost(SystemClock.elapsedRealtime()));
+                        lock.notifyAll();
+                    }
+                }
+
+                @Override
+                public void onCapabilitiesChanged(
+                        Network network, NetworkCapabilities capabilities) {
+                    if (usable(capabilities)) {
+                        synchronized (lock) {
+                            if (network.equals(cellular)) {
+                                state.available();
+                            }
+                        }
+                        return;
+                    }
+                    synchronized (lock) {
+                        if (!network.equals(cellular)) {
+                            return;
+                        }
+                        // The network is still there, but a CONNECT on it cannot
+                        // leave the phone: drop it and look for another one.
+                        cellular = null;
+                        scheduleLocked(state.capabilityLost(SystemClock.elapsedRealtime()));
+                        lock.notifyAll();
                     }
                 }
 
                 @Override
                 public void onUnavailable() {
                     synchronized (lock) {
+                        cellular = null;
+                        scheduleLocked(state.unavailable(SystemClock.elapsedRealtime()));
                         lock.notifyAll();
                     }
                 }
@@ -72,20 +131,14 @@ final class Egress implements Upstream, Closeable {
         manager = context.getSystemService(ConnectivityManager.class);
     }
 
-    /** Ask for a cellular network and keep it while the service runs. */
+    /** Ask for a cellular network and keep asking while the service runs. */
     void start() {
-        NetworkRequest request = new NetworkRequest.Builder()
-                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-                .build();
         synchronized (lock) {
-            if (requested) {
+            if (!state.start()) {
                 return;
             }
-            requested = true;
+            requestLocked();
         }
-        manager.requestNetwork(request, callback);
     }
 
     /**
@@ -95,31 +148,38 @@ final class Egress implements Upstream, Closeable {
      * pins its egress to cellular so that a socket does not come back down the
      * Wi-Fi link the requester is on. A person reading a failed request, or a
      * harness asking "was it the phone?", cannot see that from the outside —
-     * `ping` follows the default route, this name does not.
+     * `ping` follows the default route, this name does not. When there is no
+     * network, the line says why: unavailable, lost, or waiting for a retry.
      */
     String describe() {
         Network network;
-        boolean asked;
         synchronized (lock) {
             network = cellular;
-            asked = requested;
         }
-        if (network == null) {
-            return asked ? "none yet (waiting for cellular)" : "none (no listener started)";
+        String label = null;
+        if (network != null) {
+            LinkProperties properties = manager.getLinkProperties(network);
+            String iface = properties == null ? null : properties.getInterfaceName();
+            label = (iface == null ? "cellular" : iface)
+                    + " (cellular, network " + network + ")";
         }
-        LinkProperties properties = manager.getLinkProperties(network);
-        String iface = properties == null ? null : properties.getInterfaceName();
-        return (iface == null ? "cellular" : iface) + " (cellular, network " + network + ")";
+        synchronized (lock) {
+            return state.describe(label, SystemClock.elapsedRealtime());
+        }
     }
 
     @Override
     public void close() {
         synchronized (lock) {
-            if (!requested) {
+            if (state.closed()) {
                 return;
             }
-            requested = false;
+            state.close();
             cellular = null;
+            retries.removeCallbacks(retry);
+            // A CONNECT waiting here is about to fail; do not make it wait out
+            // the whole timeout for a network that will no longer be asked for.
+            lock.notifyAll();
         }
         try {
             manager.unregisterNetworkCallback(callback);
@@ -140,8 +200,12 @@ final class Egress implements Upstream, Closeable {
     public Socket connect(String host, int port, int timeoutMs) throws Failure {
         Network network = awaitCellular();
         if (network == null) {
+            String reason;
+            synchronized (lock) {
+                reason = state.reason(SystemClock.elapsedRealtime());
+            }
             throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
-                    "no cellular network with internet for " + host + ":" + port);
+                    "no usable cellular egress for " + host + ":" + port + ": " + reason);
         }
 
         InetAddress[] addresses;
@@ -169,10 +233,47 @@ final class Egress implements Upstream, Closeable {
                 "cannot reach " + host + ":" + port + " over cellular: " + last);
     }
 
+    /**
+     * Ask the platform for a cellular network. Called with {@link #lock} held,
+     * once at start and again for each retry; the previous registration is
+     * removed first so the callback is never registered twice.
+     */
+    private void requestLocked() {
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                .build();
+        try {
+            manager.unregisterNetworkCallback(callback);
+        } catch (IllegalArgumentException e) {
+            // The first request, or onUnavailable already released it.
+            Log.d(TAG, "network callback was not registered", e);
+        }
+        manager.requestNetwork(request, callback);
+    }
+
+    private void scheduleLocked(long delayMs) {
+        if (delayMs < 0) {
+            return;
+        }
+        retries.removeCallbacks(retry);
+        retries.postDelayed(retry, delayMs);
+    }
+
+    private static boolean usable(NetworkCapabilities capabilities) {
+        return capabilities != null
+                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
     private Network awaitCellular() {
         long deadline = SystemClock.elapsedRealtime() + AWAIT_MS;
         synchronized (lock) {
             while (cellular == null) {
+                if (state.closed()) {
+                    return null;
+                }
                 long left = deadline - SystemClock.elapsedRealtime();
                 if (left <= 0) {
                     return null;
