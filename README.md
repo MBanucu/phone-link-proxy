@@ -218,7 +218,8 @@ uninstalls first and takes the app's saved proxies with it.
   released after its linger, saturation refused instead of queued, a refused
   command, an unknown address type, an upstream failure reply, client counting,
   a non-SOCKS greeting; the
-  configuration rules (port range, credentials, anonymous, SSID, byte limits);
+  configuration rules (port range, the connection ceiling's bounds and its
+  profile round-trip, credentials, anonymous, SSID, byte limits);
   the status text the panel, the tile and the notification share; the runtime
   listener; and the `running` flag the tile turns into its subtitle. This is
   why the code has a `Logger` seam, an `Upstream` interface and a config/state
@@ -430,11 +431,19 @@ adb shell am start -n org.phonelink.proxy/.MainActivity
 ```
 
 The panel shows the live state (`listening on 0.0.0.0:1080 · 0 clients`, or why
-it is closed), pre-fills the stored port, user, password and SSID, and writes
+it is closed), pre-fills the stored port, connection ceiling, user, password
+and SSID, and writes
 through the same `ConfigStore` as the adb extras, so both paths configure one
 listener. `anonymous` stays adb-only, because the panel always asks for a
 password; the panel's Start also re-reads the fields, so changing them and
 pressing Start restarts the listener with the new settings.
+
+`max_connections` is how many SOCKS connections the listener may hold at once
+(16..1024, 256 by default). Each live connection costs two threads, so raising
+it is how a desktop browser with a hundred keep-alive flows is served instead of
+being refused; the panel's `Max connections` field writes the same key as
+`--ei max_connections N`. The selector-based relay that removes the thread cost
+is #37.
 
 The same two actions are on a Quick Settings tile: tapping "Phone link proxy"
 starts and stops the proxies the tile is for, and the subtitle says what is
@@ -577,7 +586,8 @@ adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 
 The panel is two screens: home is the list of saved proxies, and one of them
 opens for its settings and its log. That page is split into three segments —
-`Listener` (the port, the credentials, the SSID and the two listener boxes),
+`Listener` (the port, the connection ceiling, the credentials, the SSID and
+the two listener boxes),
 `Service` (auto-start, wireless debugging, the opt-in Wi-Fi lock, and what the
 phone says about each)
 and `Log` (this run's counters and that proxy's events) — so nothing has to be
