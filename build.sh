@@ -22,6 +22,9 @@ set -eu
 
 here=$(cd -- "$(dirname -- "$0")" && pwd -P)
 build="$here/build"
+# The dev key lives under build/ and is not tracked: every checkout generates
+# its own instead of sharing a private key through the repository.
+dev_keystore="$build/dev.keystore"
 
 sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 if [ -z "$sdk" ]; then
@@ -55,13 +58,18 @@ fi
 echo "build-tools: $build_tools"
 echo "platform:    $android_jar"
 
-rm -rf "$build"
+# Everything from the previous build goes, except the checkout's dev key. The
+# key staying put is what makes a rebuild carry the same signature, so
+# `adb install -r` updates the app instead of refusing it over a signature
+# change; delete build/dev.keystore to start a new dev identity.
 mkdir -p "$build"
+find "$build" -mindepth 1 -maxdepth 1 ! -name dev.keystore -exec rm -rf {} +
 
-# Signing. Two keys, one code path: `debug.keystore`, tracked in the repository,
-# so every build carries the same signature and `adb install -r` updates the app
-# instead of refusing it; and, when one is named in the environment, a release
-# key, which is what an APK meant for other people is signed with.
+# Signing. Two keys, one code path: a dev key generated on first use under
+# build/, so no private key is tracked in the repository; and, when one is
+# named in the environment, a release key, which is what an APK meant for other
+# people is signed with. The dev key's password is `android` because it is a
+# throwaway — a release is never signed with it.
 #
 #   PHONE_APP_KEYSTORE       the keystore file (JKS or PKCS12)
 #   PHONE_APP_KEY_ALIAS      the key inside it
@@ -70,7 +78,7 @@ mkdir -p "$build"
 #
 # The passwords reach apksigner as `env:` references, so neither appears in a
 # process listing or in the log of the job that built the release.
-keystore="$here/debug.keystore"
+keystore=$dev_keystore
 key_alias=androiddebugkey
 ks_pass=pass:android
 key_pass=pass:android
@@ -93,14 +101,17 @@ if [ -n "${PHONE_APP_KEYSTORE:-}" ]; then
     fi
 fi
 
-# The debug key is a throwaway, which is why nothing here is secret; it is only
-# generated when the file is missing, e.g. in a checkout that lost it, and never
-# when a release key is what will sign the build.
-if [ -z "${PHONE_APP_KEYSTORE:-}" ] && [ ! -f "$keystore" ]; then
-    keytool -genkeypair \
-        -keystore "$keystore" -storepass android -keypass android \
-        -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
-        -dname "CN=phone-link proxy debug" >/dev/null 2>&1
+# The dev key is a throwaway, which is why its password is public; it is
+# generated on first use in a checkout, mode 600, and never when a release key
+# is what will sign the build.
+if [ -z "${PHONE_APP_KEYSTORE:-}" ] && [ ! -f "$dev_keystore" ]; then
+    echo "generating a dev key at $dev_keystore (password: android)"
+    (umask 077 &&
+        keytool -genkeypair \
+            -keystore "$dev_keystore" -storepass android -keypass android \
+            -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=phone-link proxy debug" >/dev/null 2>&1)
+    chmod 600 "$dev_keystore"
 fi
 
 # The project's version, stamped into the manifest at build time: a phone that

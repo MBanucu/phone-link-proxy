@@ -55,8 +55,9 @@ in
   };
 
   # Compiled by `nix flake check`, and available as packages.<system>.proxy-apk.
-  # The signing key is generated inside the build, so the artifact is valid but
-  # not reproducible; installing it next to a phone-link build is the intent.
+  # build.sh generates a dev key at app/build/dev.keystore (mode 600, password
+  # `android`) because none is tracked, so the artifact is valid but not
+  # reproducible; installing it next to a phone-link build is the intent.
   apk =
     pkgs.runCommand "phone-link-proxy-apk"
       {

@@ -1,12 +1,15 @@
 name: Release
 
-# A tag is the only thing that publishes. The APK is built from the tagged tree
-# and signed with the release key — never the debug key the checked-in
-# `debug.keystore` carries — so a tag that does not build leaves no APK behind,
-# and no branch ever produces one. The keys are repository secrets:
+# A tag is the only thing that publishes, and only when it names `version`. The
+# APK is built from the tagged tree and signed with the release key — never the
+# dev key `build.sh` generates — so a tag that does not build leaves no APK
+# behind, and no branch ever produces one. The keys are repository secrets:
 # `ANDROID_KEYSTORE` (the keystore, base64 so it can be a text secret),
 # `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_ALIAS` and, if the key's password
-# differs from the store's, `ANDROID_KEY_PASS`.
+# differs from the store's, `ANDROID_KEY_PASS`. `ANDROID_CERT_SHA256` is
+# optional: set it to the release key's SHA-256 fingerprint and the built APK
+# must carry it; unset, the job warns and publishes with the debug-key check
+# alone.
 on:
   push:
     tags: ["v*"]
@@ -22,9 +25,36 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The tag is what names the artifact — `phone-link-proxy-<version>.apk` —
+      # so a tag that disagrees with `version` would publish a file whose name
+      # says nothing about the tag it was attached to. There is no override:
+      # re-tag after bumping `version`.
+      - name: Check the tag names the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version=$(tr -d '[:space:]' < version)
+          if [ -z "$version" ]; then
+            echo "::error::version is empty" >&2
+            exit 1
+          fi
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::tag $TAG does not name version $version (expected v$version)" >&2
+            exit 1
+          fi
+          echo "tag $TAG names version $version" >> "$GITHUB_STEP_SUMMARY"
+
       - uses: cachix/install-nix-action@v32
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # A tag must not publish code that a branch would have failed: the unit
+      # tests, the formatter, the changelog and the icon are all flake checks.
+      # This also compiles the APK once; the release build repeats it with the
+      # release key afterwards.
+      - name: Run the flake checks
+        run: nix flake check --print-build-logs
 
       # The keystore is a binary, and a secret is text: it travels base64-encoded
       # and is written to $RUNNER_TEMP, which the runner discards with the job.
@@ -57,8 +87,8 @@ jobs:
 
       # The listing's icon is a rendering of artwork/launcher-icon.svg. A tag
       # cut on a tree where the SVG moved and icon.png did not would publish a
-      # store picture a version behind, so this runs before the APK is built
-      # (and before the SDK is pulled for it).
+      # store picture a version behind, so this stays a named step in front of
+      # the release build as well as being part of the flake checks.
       - name: Check the icon is the drawing
         run: nix build .#checks.x86_64-linux.icon --no-link
 
@@ -70,6 +100,7 @@ jobs:
         env:
           PHONE_APP_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
           PHONE_APP_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS || secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
         run: |
           set -eu
           cat > "$RUNNER_TEMP/build-release.sh" <<'SCRIPT'
@@ -81,6 +112,27 @@ jobs:
           if printf "%s" "$certs" | grep -q "CN=phone-link proxy debug"; then
             echo "::error::the APK carries the debug key; refusing to publish it" >&2
             exit 1
+          fi
+          # A signature that is not the debug one is not necessarily the release
+          # key: a mistyped secret would sign with another key that installs
+          # nothing over the previous release. The fingerprint is public, so it
+          # is a secret only to keep it in one place; when it is set it must match.
+          if [ -n "${ANDROID_CERT_SHA256:-}" ]; then
+            want=$(printf "%s" "$ANDROID_CERT_SHA256" | tr 'A-F' 'a-f' | tr -d ' :')
+            got=$(printf "%s\n" "$certs" |
+              sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
+              tr 'A-F' 'a-f' | tr -d ' :')
+            if [ -z "$got" ]; then
+              echo "::error::could not read the APK's SHA-256 fingerprint" >&2
+              exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::the APK certificate is $got, not ANDROID_CERT_SHA256 ($want)" >&2
+              exit 1
+            fi
+            echo "certificate fingerprint matches ANDROID_CERT_SHA256"
+          else
+            echo "::warning::ANDROID_CERT_SHA256 is not set; the release certificate fingerprint was not pinned"
           fi
           SCRIPT
           chmod +x "$RUNNER_TEMP/build-release.sh"

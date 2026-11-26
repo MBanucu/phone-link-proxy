@@ -36,12 +36,11 @@ That is what F-Droid's build server offers — Debian userland, no nix, and
   F-Droid refuses an app whose source does not say what it may be used for.
 - `commit` is the full hash of the `v0.11.1` tag, not the tag name: F-Droid
   pins the commit so a moved tag cannot change what is being built.
-- `scandelete: debug.keystore` drops the tracked keystore before the build, so
-  the tarball F-Droid publishes and scans carries no binary blob. That is safe
-  because `build.sh` creates `debug.keystore` itself when it is missing (it
-  calls `keytool`), and the APK it then signs is still valid — checked by
-  deleting the file and building. `scanignore` would work too, but it would
-  leave a keystore in the published source.
+- no `scandelete` or keystore entry: `build.sh` generates a throwaway dev key
+  at `build/dev.keystore` on first use (mode 600, password `android`) and
+  `build/` is not part of the source, so the tarball F-Droid publishes and
+  scans carries no private key. Nothing tracked has to be deleted before the
+  build.
 
 Their build re-signs the APK with F-Droid's own key, so an install from
 f-droid.org cannot update one from this repository's releases: Android refuses
