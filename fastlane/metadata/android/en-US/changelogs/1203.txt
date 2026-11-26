@@ -1,0 +1,3 @@
+Raises the connection ceiling from 128 to 256, because a desktop browser alone
+can hold about a hundred keep-alive flows. Same two threads per connection;
+the selector relay that removes the thread cost is tracked separately.
