@@ -288,7 +288,7 @@ final class Socks5Server implements Closeable {
                 return;
             }
             if (!track(client)) {
-                Closeables.closeQuietly(client);
+                Closeables.resetQuietly(client);
                 return;
             }
             try {
@@ -297,7 +297,7 @@ final class Socks5Server implements Closeable {
                 // Bounded on purpose: refusing a client beats exhausting the
                 // process with threads a LAN client asked for.
                 untrack(client);
-                Closeables.closeQuietly(client);
+                Closeables.resetQuietly(client);
                 log("refused a client: " + maxConnections + " connections already in use");
             }
         }
@@ -323,7 +323,7 @@ final class Socks5Server implements Closeable {
         synchronized (lifecycle) {
             if (closed) {
                 sockets.remove(client);
-                Closeables.closeQuietly(client);
+                Closeables.resetQuietly(client);
                 return;
             }
             count = clients.incrementAndGet();
@@ -356,7 +356,7 @@ final class Socks5Server implements Closeable {
             }
             // The upstream half is a tunnel too: a stop has to close it.
             if (!track(connected)) {
-                Closeables.closeQuietly(connected);
+                Closeables.resetQuietly(connected);
                 return;
             }
             writeReply(out, REPLY_SUCCEEDED, connected);
@@ -369,8 +369,8 @@ final class Socks5Server implements Closeable {
             if (connected != null) {
                 untrack(connected);
             }
-            Closeables.closeQuietly(connected);
-            Closeables.closeQuietly(client);
+            Closeables.closeBoundedQuietly(connected);
+            Closeables.closeBoundedQuietly(client);
             listener.onClientsChanged(clients.decrementAndGet());
         }
     }
@@ -631,8 +631,8 @@ final class Socks5Server implements Closeable {
         }
 
         void closeBoth() {
-            Closeables.closeQuietly(client);
-            Closeables.closeQuietly(upstream);
+            Closeables.closeBoundedQuietly(client);
+            Closeables.closeBoundedQuietly(upstream);
         }
     }
 
@@ -664,7 +664,7 @@ final class Socks5Server implements Closeable {
         }
         Closeables.closeQuietly(listening);
         for (Socket socket : tunnels) {
-            Closeables.closeQuietly(socket);
+            Closeables.resetQuietly(socket);
         }
         for (Thread relay : relays) {
             relay.interrupt();
