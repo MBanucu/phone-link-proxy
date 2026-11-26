@@ -1,0 +1,3 @@
+A CONNECT whose cellular handshake is lost is now retried once with a fresh
+socket after 4 s instead of stalling for 15 s. Refused connections are not
+retried, and the egress shares one timeout budget across a host's addresses.
