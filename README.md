@@ -63,8 +63,8 @@ silhouette is what the system wants.
 
 ## When it listens
 
-The port is only open while the phone is a client of the configured SSID, so it
-can sit on a hotel or café Wi-Fi without offering a relay to it:
+By default the port is only open while the phone is a client of the configured
+SSID, so it can sit on a hotel or café Wi-Fi without offering a relay to it:
 
 | phone state | verdict |
 |---|---|
@@ -72,9 +72,18 @@ can sit on a hotel or café Wi-Fi without offering a relay to it:
 | joined any other Wi-Fi | paused, port closed |
 | no Wi-Fi at all | paused, port closed |
 
-Tethering does not count: the hotspot and USB paths are out of scope for this
-app, so the port stays closed there too (the vendored app still covers hotspot
-mode).
+Tethering has no first-class support. With the default SSID gate the hotspot
+and USB paths keep the port closed (the vendored app still covers hotspot
+mode). `any_network` removes that gate: the same wildcard listener then
+opens on whatever network Android reports, including a hotspot or USB tether. It
+is not a separate transport mode — egress is still the cellular request — and it
+does not by itself make USB fallback work: the laptop's `proxyHosts` still has
+to name an address at which the phone is reachable, and a tether address can
+change with every connection. That is the trade-off: the port is exposed on
+every network the phone joins, not only the one you named, so the username and
+password still apply; it is unauthenticated only when `anonymous` is set
+explicitly. A first-class USB transport is planned; until then `any_network` is
+the way to use the USB path.
 
 The service stays in the foreground while paused and reports why
 (`not listening: on "FRITZ!Box 7530 XJ", not "PhoneLink"`), so it opens by
@@ -189,7 +198,12 @@ The version in the name is the app's own `version` file, which is the one
 source `build.sh` stamps into the manifest.
 
 The laptop repository's `phone-proxy-install` fetches that APK (checksum
-checked) and installs it. A phone that already runs a locally built APK cannot update in place — that
+checked) and installs it. On the laptop the first run is `phone-proxy-install`,
+then `phone-proxy-setup`: setup starts the proxy with the credentials from the
+root-only secrets file, turns auto-start on unless `--no-auto-start` is given,
+and verifies a request through the listener. `phone-proxy-setup --check`
+reports the settings and repeats that request without changing them. A phone
+that already runs a locally built APK cannot update in place — that
 one carries the debug key — so it needs `--replace-signer` once, which
 uninstalls first and takes the app's saved proxies with it.
 
@@ -739,17 +753,21 @@ has a client.
 
 ## Settings
 
-Read from the intent on start and kept in the app's private preferences, so a
-sticky restart or the boot receiver reuses them:
+Read from the intent on start and kept in the app's private, non-backed-up
+preferences. They are device-protected, so the boot receiver can read them
+before the first unlock — the same trade-off as the pre-unlock listener: the app
+can read the credentials while the device is locked. The `state.txt` file adb
+can read holds no credentials; an export you choose to write does, in plain
+text.
 
 | extra | default | meaning |
 |---|---|---|
 | `port` (`--ei`) | `1080` | listen port, `1024..65535` |
-| `user` (`--es`) | — | RFC 1929 username, required |
-| `password` (`--es`) | — | RFC 1929 password, required |
+| `user` (`--es`) | — | RFC 1929 username, required unless `anonymous` |
+| `password` (`--es`) | — | RFC 1929 password, required unless `anonymous` |
 | `anonymous` (`--ez`) | `false` | listen without authentication |
 | `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
-| `any_network` (`--ez`) | `false` | ignore the predicate and always listen (tests) |
+| `any_network` (`--ez`) | `false` | ignore the SSID gate and listen on any connected network; not a transport mode, and still authenticated unless `anonymous` |
 | `auto_start` (`--ez`) | `false` | come back after a reboot and stay up (the SSID still gates the port) |
 | `wifi_lock` (`--ez`) | `false` | opt-in experiment: hold a Wi-Fi lock while a Wi-Fi listener is bound; costs battery and does not promise to fix #11 |
 | `adb_wifi` (`--ez`) | `true` | turn wireless debugging back on when the phone joins the SSID (needs `WRITE_SECURE_SETTINGS`) |
@@ -782,8 +800,9 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 Passing the credential on the `am` command line puts it in the shell process's
 argv for the moment the command runs — the same exposure as any `adb shell`
 argument, and the reason `phone-link` keeps it in the root-only secrets file
-rather than the Nix store. `anonymous=true` is refused by default because a
-wildcard listener on a Wi-Fi LAN is an open relay.
+rather than the Nix store. An unauthenticated listener is off by default:
+`anonymous=true` removes the password check, and a wildcard listener on a Wi-Fi
+LAN is then an open relay.
 
 ### Taking them off the phone, and putting them back
 
@@ -810,7 +829,8 @@ writes one, and the app never puts it anywhere by itself.
 
 ## Which build is this
 
-The APK's `versionName` is this repository's `version` and its `versionCode`
+The current release is 0.12.0. The APK's `versionName` is this repository's
+`version` and its `versionCode`
 is `major*10000 + minor*100 + patch`, stamped into a copy of
 `AndroidManifest.xml` by `build.sh` from that file. The tracked manifest keeps a template
 (`0.0.0`), so a checkout that was never rebuilt does not claim a release, and
@@ -823,8 +843,11 @@ offline it says the check is unknown instead of guessing).
 
 ## What this scaffold does not do yet
 
-- Tethering is excluded on purpose, so a phone in hotspot or USB-tether mode has
-  no listener from this app. Use the vendored proxy for that mode.
+- Tethering is not a first-class transport. By default the SSID gate keeps the
+  port closed on hotspot and USB tether; `any_network` opens the same wildcard
+  listener there, but egress is still cellular and the laptop's `proxyHosts`
+  still has to reach the phone (a tether address changes per connection). Use
+  the vendored proxy for hotspot mode.
 - A boot restart needs two gates, not one (see `Run`): the app enabled in
   DokeOS Auto Start Management — a signature-protected screen the app cannot
   read or write — and the battery-optimization exemption. Missing the second,
@@ -849,6 +872,6 @@ fetched from <https://www.gnu.org/licenses/gpl-3.0.txt> rather than retyped;
 ## F-Droid
 
 `fdroid/` holds the metadata entry F-Droid's build server reads
-(`org.phonelink.proxy.yml`, for 0.11.1) and `fdroid/README.md` the reasoning
-behind each field, how to submit it, and how to add the next release's entry.
-Nothing there is shipped in the APK.
+(`org.phonelink.proxy.yml`, current release 0.12.0) and `fdroid/README.md` the
+reasoning behind each field, how to submit it, and how to add the next
+release's entry. Nothing there is shipped in the APK.

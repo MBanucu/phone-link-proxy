@@ -9,11 +9,18 @@ Why it exists:
   phone's default network is the laptop, so a socket opened on the default
   route comes back to the host that asked for it. The app holds an active
   cellular network request and resolves and connects on it.
-- It listens on all interfaces, so the port is the same on a Wi-Fi, hotspot or
-  USB link and survives the address changing.
-- The port only opens while the phone is a client of the SSID the proxy names,
-  so the phone can sit on a hotel or cafe network without offering a relay to
-  it.
+- It binds all interfaces, so the port is the same on a Wi-Fi, hotspot or USB
+  link and survives the address changing. Binding is not a transport choice:
+  by default the SSID gate still keeps the port closed on any network but the
+  one you name.
+- By default the port only opens while the phone is a client of the SSID the
+  proxy names, so the phone can sit on a hotel or cafe network without offering
+  a relay to it. `any_network` removes that gate; it is not a separate transport
+  mode, and it does not by itself make USB fallback work.
+- The listener requires the username and password you configure. It runs
+  without authentication only when you tick "Listen without authentication"
+  (or pass `anonymous=true`), and then anyone who can reach the port can relay
+  through the phone.
 - The wake lock is held only while a client is connected.
 - No screen automation: the service is exported and guarded by
   android.permission.DUMP, which adb holds and ordinary apps do not, so a
@@ -27,4 +34,8 @@ exported to a file and imported again, which is the answer to losing them to a
 signing-key change or a reset phone.
 
 The app documents its own adb contract in About this app, which is also what
-the service prints for dumpsys. It holds no credentials on disk.
+the service prints for dumpsys. Credentials stay in the app's private,
+non-backed-up preferences; they are device-protected so the listener can start
+before the first unlock, which means the app can read them while the device is
+locked. The state file adb can read holds no credentials, and an export you
+write yourself is plain text and says so.
