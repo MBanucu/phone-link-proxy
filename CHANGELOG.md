@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The listener's connection ceiling is configurable (`max_connections`, 16..1024,
+  default 256) through the panel, the profile documents and adb. Two threads per
+  live connection mean a higher ceiling costs memory, and the selector relay
+  that removes that cost is #37.
+
 ### Changed
 
 - The connection ceiling is 256 instead of 128. A desktop browser alone held

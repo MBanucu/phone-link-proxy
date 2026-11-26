@@ -63,23 +63,28 @@ final class Socks5Server implements Closeable {
     private static final int CONNECT_TIMEOUT_MS = 15_000;
 
     /**
-     * Connections served at once: four times the old 32-connection ceiling and
-     * a full-device tunnel's desktop-sized flow counts.
+     * The default ceiling: how many connections are served at once when nothing
+     * else says otherwise. It is a setting now ({@code max_connections}, 16..1024
+     * in {@link ProxyConfig}), so a listener can fit a desktop's flow count
+     * without a rebuild; this constant is what the convenience constructor and
+     * the tests use.
      *
      * <p>Each live connection costs two threads: the handler thread that runs
      * the handshake and then pumps client-to-upstream, and one relay thread
      * that pumps upstream-to-client. So the ceiling is
-     * {@code 2 * MAX_CONNECTIONS + 1 accept + 1 shared linger = 514} threads at
-     * 256, against {@code 3 * 32 = 96} for the old three-thread relay. The
-     * handler threads time out after a minute, so idle bursts do not keep the
-     * budget reserved. The ceiling stays fixed: a client cannot make the
-     * process create threads without end.
+     * {@code 2 * maxConnections + 1 accept + 1 shared linger = 514} threads at
+     * the default 256, against {@code 3 * 32 = 96} for the old three-thread
+     * relay. The handler threads time out after a minute, so idle bursts do not
+     * keep the budget reserved. The ceiling stays bounded on purpose: a client
+     * cannot make the process create threads without end, whatever the setting
+     * allows.
      *
      * <p>A desktop browser alone can hold about a hundred keep-alive flows; 128
      * was reached by Chrome and a handful of tools, so the next refusal hit a
-     * normal desktop. Two threads per connection and a 256 ceiling stay inside
+     * normal desktop. Two threads per connection at the default 256 stay inside
      * the phone's limits (RLIMIT_NPROC is 61417), while a selector-based relay
-     * that does not need a thread pair per idle flow is the long-term fix.
+     * that does not need a thread pair per idle flow is the long-term fix,
+     * tracked as issue #37.
      */
     static final int MAX_CONNECTIONS = 256;
     /**

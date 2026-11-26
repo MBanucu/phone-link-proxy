@@ -166,7 +166,8 @@ final class Port {
         Socks5Server candidate = new Socks5Server(
                 config.port, config.user, config.password, upstream, traffic,
                 connected -> setClients(self[0], connected),
-                message -> Log.i(ProxyService.TAG, message));
+                message -> Log.i(ProxyService.TAG, message),
+                config.maxConnections, Socks5Server.RELAY_LINGER_MS);
         self[0] = candidate;
         IOException failure = null;
         synchronized (lock) {

@@ -441,24 +441,49 @@ public final class ProxyAppTest {
             assertEqual("", config.user, "default user");
             assertTrue(!config.anyNetwork, "any_network is off by default");
             assertTrue(!config.anonymous, "authentication is on by default");
+            assertEqual(256, config.maxConnections, "default max_connections");
+        });
+
+        test("a connection ceiling outside 16..1024 is rejected", () -> {
+            expectRejected("15", () ->
+                    ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false, false, 15));
+            expectRejected("1025", () ->
+                    ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false, false, 1025));
+            assertEqual(16, ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false, false,
+                    16).maxConnections, "the lower bound");
+            assertEqual(1024, ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false, false,
+                    1024).maxConnections, "the upper bound");
+        });
+
+        test("a non-default connection ceiling passes through", () -> {
+            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false,
+                    false, 512);
+            assertEqual(512, config.maxConnections, "max_connections");
+            assertEqual("port 1080 · SSID PhoneLink · user proxy", config.summary(),
+                    "the summary is unchanged");
         });
 
         test("a port outside 1024..65535 is rejected", () -> {
             expectRejected("port 80", () ->
-                    ProxyConfig.of(80, "proxy", "s3cret", "PhoneLink", false, false));
+                    ProxyConfig.of(80, "proxy", "s3cret", "PhoneLink", false, false,
+                            ProxyConfig.DEFAULT_MAX_CONNECTIONS));
             expectRejected("port 70000", () ->
-                    ProxyConfig.of(70000, "proxy", "s3cret", "PhoneLink", false, false));
+                    ProxyConfig.of(70000, "proxy", "s3cret", "PhoneLink", false, false,
+                            ProxyConfig.DEFAULT_MAX_CONNECTIONS));
         });
 
         test("credentials are required unless anonymous", () -> {
             expectRejected("empty user and password", () ->
-                    ProxyConfig.of(1080, "", "", "PhoneLink", false, false));
+                    ProxyConfig.of(1080, "", "", "PhoneLink", false, false,
+                            ProxyConfig.DEFAULT_MAX_CONNECTIONS));
             expectRejected("a password without a user", () ->
-                    ProxyConfig.of(1080, "", "s3cret", "PhoneLink", false, false));
+                    ProxyConfig.of(1080, "", "s3cret", "PhoneLink", false, false,
+                            ProxyConfig.DEFAULT_MAX_CONNECTIONS));
         });
 
         test("anonymous clears stale credentials", () -> {
-            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false, true);
+            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "PhoneLink", false,
+                    true, ProxyConfig.DEFAULT_MAX_CONNECTIONS);
             assertTrue(config.anonymous, "anonymous is kept");
             assertEqual("", config.user, "user cleared");
             assertEqual("", config.password, "password cleared");
@@ -468,18 +493,22 @@ public final class ProxyAppTest {
             char[] tooLong = new char[256];
             Arrays.fill(tooLong, 'x');
             expectRejected("a 256-byte password", () ->
-                    ProxyConfig.of(1080, "proxy", new String(tooLong), "PhoneLink", false, false));
+                    ProxyConfig.of(1080, "proxy", new String(tooLong), "PhoneLink", false,
+                            false, ProxyConfig.DEFAULT_MAX_CONNECTIONS));
         });
 
         test("an empty SSID is rejected unless any_network is set", () -> {
             expectRejected("an empty SSID", () ->
-                    ProxyConfig.of(1080, "proxy", "s3cret", "", false, false));
-            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "", true, false);
+                    ProxyConfig.of(1080, "proxy", "s3cret", "", false, false,
+                            ProxyConfig.DEFAULT_MAX_CONNECTIONS));
+            ProxyConfig config = ProxyConfig.of(1080, "proxy", "s3cret", "", true, false,
+                    ProxyConfig.DEFAULT_MAX_CONNECTIONS);
             assertTrue(config.anyNetwork, "any_network is kept");
         });
 
         test("valid settings pass through unchanged", () -> {
-            ProxyConfig config = ProxyConfig.of(1081, "proxy", "s3cret", "PhoneLink", false, false);
+            ProxyConfig config = ProxyConfig.of(1081, "proxy", "s3cret", "PhoneLink", false,
+                    false, ProxyConfig.DEFAULT_MAX_CONNECTIONS);
             assertEqual(1081, config.port, "port");
             assertEqual("proxy", config.user, "user");
             assertEqual("s3cret", config.password, "password");
@@ -488,10 +517,12 @@ public final class ProxyAppTest {
 
         test("the summary says what a configuration holds, without the password", () -> {
             ProxyConfig config =
-                    ProxyConfig.of(1081, "proxy", "s3cret", "PhoneLink", false, false);
+                    ProxyConfig.of(1081, "proxy", "s3cret", "PhoneLink", false, false,
+                            ProxyConfig.DEFAULT_MAX_CONNECTIONS);
             assertEqual("port 1081 · SSID PhoneLink · user proxy", config.summary(),
                     "summary");
-            ProxyConfig open = ProxyConfig.of(1081, "", "", "", true, true);
+            ProxyConfig open = ProxyConfig.of(1081, "", "", "", true, true,
+                    ProxyConfig.DEFAULT_MAX_CONNECTIONS);
             assertEqual("port 1081 · any network · no authentication", open.summary(),
                     "anonymous summary");
         });
@@ -519,8 +550,8 @@ public final class ProxyAppTest {
 
         test("the help text an agent reads names the whole adb contract", () -> {
             String text = Help.text("org.phonelink.proxy");
-            for (String extra : List.of("--ei port", "--es user", "--es password",
-                    "--es ssid", "--ez anonymous", "--ez any_network",
+            for (String extra : List.of("--ei port", "--ei max_connections", "--es user",
+                    "--es password", "--es ssid", "--ez anonymous", "--ez any_network",
                     "--ez auto_start", "--ez wifi_lock", "--ez adb_wifi",
                     "--es profile")) {
                 assertTrue(text.contains(extra), "help does not mention " + extra);
@@ -965,7 +996,8 @@ public final class ProxyAppTest {
             ProfileDocument document = new ProfileDocument();
             ProfileDocument.Entry laptop = new ProfileDocument.Entry();
             laptop.name = "laptop";
-            laptop.config = ProxyConfig.raw(1081, "proxy", "s3cret", "PhoneLink", true, false);
+            laptop.config = ProxyConfig.raw(1081, "proxy", "s3cret", "PhoneLink", true, false,
+                    512);
             laptop.autoStart = true;
             laptop.adbWireless = false;
             laptop.wifiLock = true;
@@ -973,7 +1005,8 @@ public final class ProxyAppTest {
             document.saved.add(laptop);
             ProfileDocument.Entry hotel = new ProfileDocument.Entry();
             hotel.name = "hotel \"the\" \\ one";
-            hotel.config = ProxyConfig.raw(1082, "user", "pass\tword", "Hotel", false, true);
+            hotel.config = ProxyConfig.raw(1082, "user", "pass\tword", "Hotel", false, true,
+                    ProxyConfig.DEFAULT_MAX_CONNECTIONS);
             document.saved.add(hotel);
             document.inUse = "laptop";
             document.selected = "hotel";
@@ -984,6 +1017,7 @@ public final class ProxyAppTest {
             ProfileDocument.Entry first = read.saved.get(0);
             assertEqual("laptop", first.name, "name");
             assertEqual(1081, first.config.port, "port");
+            assertEqual(512, first.config.maxConnections, "max connections");
             assertEqual("proxy", first.config.user, "user");
             assertEqual("s3cret", first.config.password, "password");
             assertEqual("PhoneLink", first.config.ssid, "ssid");
@@ -999,6 +1033,28 @@ public final class ProxyAppTest {
             assertEqual("laptop", read.inUse, "in use");
             assertEqual("hotel", read.selected, "selected");
             assertEqual(1081, read.active.config.port, "the configuration in use");
+        });
+
+        test("an export round-trips the connection ceiling, and an old file gets 256", () -> {
+            ProfileDocument document = new ProfileDocument();
+            ProfileDocument.Entry laptop = new ProfileDocument.Entry();
+            laptop.name = "laptop";
+            laptop.config = ProxyConfig.raw(1081, "proxy", "s3cret", "PhoneLink", false, false,
+                    512);
+            document.saved.add(laptop);
+            document.active = laptop;
+
+            ProfileDocument read = ProfileDocument.parse(document.write());
+            assertEqual(512, read.saved.get(0).config.maxConnections,
+                    "the exported max_connections");
+            assertEqual(512, read.active.config.maxConnections,
+                    "the configuration in use keeps it too");
+
+            ProfileDocument old = ProfileDocument.parse(
+                    "{\"saved\": [{\"name\": \"old\", \"port\": 1081}]}");
+            assertEqual(ProxyConfig.DEFAULT_MAX_CONNECTIONS,
+                    old.saved.get(0).config.maxConnections,
+                    "a document without the field imports as 256");
         });
 
         test("a document hands over its proxies by name, the last one winning", () -> {
@@ -1018,6 +1074,8 @@ public final class ProxyAppTest {
                     "{\"saved\": [{\"name\": \"bare\"}]}");
             ProfileDocument.Entry entry = document.saved.get(0);
             assertEqual(ProxyConfig.DEFAULT_PORT, entry.config.port, "port");
+            assertEqual(ProxyConfig.DEFAULT_MAX_CONNECTIONS, entry.config.maxConnections,
+                    "an old document keeps the 256 default");
             assertEqual(ProxyConfig.DEFAULT_SSID, entry.config.ssid, "ssid");
             assertTrue(entry.adbWireless, "the wireless-debugging switch defaults on");
             assertFalse(entry.autoStart, "auto start");

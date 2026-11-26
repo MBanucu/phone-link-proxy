@@ -298,6 +298,7 @@ public final class ProxyService extends Service implements Port.Host {
                 + " \u00b7 \u2191 " + Traffic.human(up) + " in this run");
         if (config != null) {
             writer.println("  using       " + config.summary());
+            writer.println("  max_connections " + config.maxConnections);
         }
         // Not the phone's default route: a request that fails here has to be
         // told apart from one the phone's Wi-Fi could have carried.

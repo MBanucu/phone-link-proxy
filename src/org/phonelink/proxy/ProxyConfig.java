@@ -13,6 +13,9 @@ final class ProxyConfig {
 
     static final int DEFAULT_PORT = 1080;
     static final String DEFAULT_SSID = "PhoneLink";
+    static final int DEFAULT_MAX_CONNECTIONS = 256;
+    static final int MIN_MAX_CONNECTIONS = 16;
+    static final int MAX_MAX_CONNECTIONS = 1024;
 
     final int port;
     final String user;
@@ -21,6 +24,8 @@ final class ProxyConfig {
     final boolean anyNetwork;
     /** Listen without credentials; a checkbox in the panel, `anonymous=true` over adb. */
     final boolean anonymous;
+    /** How many SOCKS connections may be open at once. */
+    final int maxConnections;
 
     private ProxyConfig(
             int port,
@@ -28,13 +33,15 @@ final class ProxyConfig {
             String password,
             String ssid,
             boolean anyNetwork,
-            boolean anonymous) {
+            boolean anonymous,
+            int maxConnections) {
         this.port = port;
         this.user = user;
         this.password = password;
         this.ssid = ssid;
         this.anyNetwork = anyNetwork;
         this.anonymous = anonymous;
+        this.maxConnections = maxConnections;
     }
 
     /** Values as stored, without judgement: for pre-filling the form. */
@@ -44,13 +51,14 @@ final class ProxyConfig {
             String password,
             String ssid,
             boolean anyNetwork,
-            boolean anonymous) {
+            boolean anonymous,
+            int maxConnections) {
         return new ProxyConfig(port, nullToEmpty(user), nullToEmpty(password),
-                nullToEmpty(ssid), anyNetwork, anonymous);
+                nullToEmpty(ssid), anyNetwork, anonymous, maxConnections);
     }
 
     static ProxyConfig defaults() {
-        return raw(DEFAULT_PORT, "", "", DEFAULT_SSID, false, false);
+        return raw(DEFAULT_PORT, "", "", DEFAULT_SSID, false, false, DEFAULT_MAX_CONNECTIONS);
     }
 
     /**
@@ -65,13 +73,19 @@ final class ProxyConfig {
             String password,
             String ssid,
             boolean anyNetwork,
-            boolean anonymous) {
+            boolean anonymous,
+            int maxConnections) {
         String givenUser = nullToEmpty(user);
         String givenPassword = nullToEmpty(password);
         String givenSsid = nullToEmpty(ssid);
 
         if (port < 1024 || port > 65535) {
             throw new IllegalArgumentException("port must be 1024..65535, got " + port);
+        }
+        if (maxConnections < MIN_MAX_CONNECTIONS || maxConnections > MAX_MAX_CONNECTIONS) {
+            throw new IllegalArgumentException("max_connections must be "
+                    + MIN_MAX_CONNECTIONS + ".." + MAX_MAX_CONNECTIONS
+                    + ", got " + maxConnections);
         }
         if (anonymous) {
             // The listener treats empty credentials as "no authentication", so
@@ -91,7 +105,8 @@ final class ProxyConfig {
             throw new IllegalArgumentException(
                     "no SSID to match: set an SSID, or any_network=true");
         }
-        return new ProxyConfig(port, givenUser, givenPassword, givenSsid, anyNetwork, anonymous);
+        return new ProxyConfig(port, givenUser, givenPassword, givenSsid, anyNetwork, anonymous,
+                maxConnections);
     }
 
     /**

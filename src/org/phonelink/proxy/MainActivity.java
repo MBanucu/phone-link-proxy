@@ -232,6 +232,8 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     private void wireHelp() {
         info(R.id.info_port, R.string.info_port_title, R.string.info_port);
+        info(R.id.info_max_connections, R.string.info_max_connections_title,
+                R.string.info_max_connections);
         info(R.id.info_user, R.string.info_user_title, R.string.info_user);
         info(R.id.info_password, R.string.info_password_title, R.string.info_password);
         info(R.id.info_ssid, R.string.info_ssid_title, R.string.info_ssid);
@@ -329,7 +331,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         }
         ProxyConfig base = ConfigStore.load(this);
         ProxyConfig seed = ProxyConfig.raw(nextFreePort(base.port), base.user, base.password,
-                base.ssid, base.anyNetwork, base.anonymous);
+                base.ssid, base.anyNetwork, base.anonymous, base.maxConnections);
         ConfigStore.saveProfile(this, name, seed, ConfigStore.autoStart(this),
                 ConfigStore.adbWireless(this), ConfigStore.wifiLock(this));
         EventLog.addTo(name, "created \"" + name + "\"");
