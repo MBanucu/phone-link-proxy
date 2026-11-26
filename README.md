@@ -98,6 +98,35 @@ list sits in front of four Android gates — a missing `RECEIVE_BOOT_COMPLETED`,
 `location` service type, and this SSID rule — and all five are documented in
 [docs/pre-unlock-autostart.md](docs/pre-unlock-autostart.md).
 
+### Keeping the Wi-Fi association
+
+Android may leave an access point that has no internet after 30–94 seconds on
+this phone (`mIpReachabilityDisconnectEnabled=true`), and the listener closes
+with the link. `wifi_lock` is an opt-in **experiment** for that case, not a
+promise: it asks Android for a Wi-Fi lock while at least one listener is bound
+on Wi-Fi. It is off by default, and anything started with `any_network` does
+not hold it because that listener need not use Wi-Fi at all. Pausing or
+stopping the last such listener releases the lock; so does the service going
+away.
+
+The platform weakens what the lock can mean. From Android 14,
+`WIFI_MODE_FULL_HIGH_PERF` is deprecated and AOSP's `WifiLockManager` converts
+it to `WIFI_MODE_FULL_LOW_LATENCY`; low latency is only effective while Wi-Fi
+is connected, the screen is on and the acquiring app has foreground importance,
+which a foreground *service* does not give it. The app therefore asks for
+`WIFI_MODE_FULL_LOW_LATENCY` on API 34+ and `WIFI_MODE_FULL_HIGH_PERF` on API
+29–33. A lock that is held costs battery while it is held. Treat #11 as open
+until a 30-minute screen-off test on the phone shows the association surviving;
+the adb switch is how such a run is set up.
+
+```sh
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.START --ez wifi_lock true \
+    --ez any_network false
+adb shell dumpsys activity service org.phonelink.proxy/.ProxyService |
+    grep -E 'wifi_lock |listening'
+```
+
 ## Build
 
 ```sh
@@ -532,7 +561,8 @@ adb shell pm grant org.phonelink.proxy android.permission.WRITE_SECURE_SETTINGS
 The panel is two screens: home is the list of saved proxies, and one of them
 opens for its settings and its log. That page is split into three segments —
 `Listener` (the port, the credentials, the SSID and the two listener boxes),
-`Service` (auto-start, wireless debugging, and what the phone says about each)
+`Service` (auto-start, wireless debugging, the opt-in Wi-Fi lock, and what the
+phone says about each)
 and `Log` (this run's counters and that proxy's events) — so nothing has to be
 scrolled past to reach the next thing. `Back` (or the arrow in the header)
 returns to the list.
@@ -580,7 +610,7 @@ the card it starts or stops that proxy without opening it and without asking
 for the battery exemption; on the open page it stores the form into the proxy
 first and then starts it, so the proxy that runs is the one that was saved and
 the list marks the right card. A name is only a label, so `Rename` moves the
-settings, the two switches and the mark of which proxy is in use with it.
+settings, the service switches and the mark of which proxy is in use with it.
 
 Each proxy keeps its own log: the last 200 things that happened to it, newest
 first with a time — the state changes (`listening on 0.0.0.0:1081 · 0
@@ -600,12 +630,12 @@ panel samples them once a second while a proxy is open, and a start resets both,
 so the page answers "what has this run moved" rather than "what has this phone
 ever moved".
 
-Both preference checkboxes follow the store, so `--ez auto_start …` or
-`--ez adb_wifi …` while the panel is open shows up there without reopening it.
-Ticking wireless debugging stores it at once — it only changes what happens on
-the next SSID match — while auto-start waits for `Save`, and a form that
-differs from the saved proxy says `Not saved yet — Save writes this to the
-configuration`. `Revert` drops the edits and shows the store again.
+The Service page's switches follow the store, so `--ez auto_start …`,
+`--ez adb_wifi …` or `--ez wifi_lock …` while the panel is open shows up there
+without reopening it. Ticking wireless debugging stores it at once — it only
+changes what happens on the next SSID match — while auto-start and the Wi-Fi
+lock wait for `Save`, and a form that differs from the saved proxy says
+`Not saved yet — Save writes this to the configuration`. `Revert` drops the edits and shows the store again.
 Under the wireless-debugging checkbox a line says what Android is doing right
 now (`Wireless debugging: on — adb can reach the phone`), and why the app cannot
 help when the permission was never granted. Everything else on the page is
@@ -629,7 +659,8 @@ A stopped service has no record to dump, so there the panel is the way in, or
 the same dialog on the phone. The few facts a check needs while the service is
 stopped are still readable: every change to the store rewrites
 `/sdcard/Android/data/org.phonelink.proxy/files/state.txt`, one `key value`
-line each — `auto_start`, `adb_wifi`, `port`, `ssid`, `any_network`, `in_use` —
+line each — `auto_start`, `adb_wifi`, `wifi_lock`, `port`, `ssid`,
+`any_network`, `in_use` —
 so `phone-doctor` can say what auto-start is set to and what Android's battery
 gate reports for a phone whose service is not running. It cannot see the
 DokeOS list. The file holds no credentials.
@@ -720,6 +751,7 @@ sticky restart or the boot receiver reuses them:
 | `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
 | `any_network` (`--ez`) | `false` | ignore the predicate and always listen (tests) |
 | `auto_start` (`--ez`) | `false` | come back after a reboot and stay up (the SSID still gates the port) |
+| `wifi_lock` (`--ez`) | `false` | opt-in experiment: hold a Wi-Fi lock while a Wi-Fi listener is bound; costs battery and does not promise to fix #11 |
 | `adb_wifi` (`--ez`) | `true` | turn wireless debugging back on when the phone joins the SSID (needs `WRITE_SECURE_SETTINGS`) |
 | `profile` (`--es`) | — | the saved configuration to start from; the extras above are applied on top of it |
 
@@ -735,7 +767,7 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 ```
 
 Saving does not disturb a running listener. `dumpsys` lists what is saved with
-the two switches each one holds, the panel's `Saved` page shows the same names,
+the service switches each one holds, the panel's `Saved` page shows the same names,
 and `START --es profile hotel` starts that configuration again later, on any
 port or SSID the same command adds on top. An unknown name starts nothing and
 logs `no saved configuration called "hotel"`; a name that already exists is
@@ -757,7 +789,8 @@ wildcard listener on a Wi-Fi LAN is an open relay.
 
 The menu's **Export every proxy…** writes all of it — every saved proxy with its
 port, SSID, user, password, `anonymous`, `any_network`, `auto_start`,
-`adb_wifi` and tile mark, plus the configuration in use and the two names that
+`adb_wifi`, `wifi_lock` and tile mark, plus the configuration in use and the
+two names that
 mark it — to one file the system picker chooses. **Import proxies…** reads such a
 file back and asks whether to replace every proxy on the phone or to merge by
 name. Nothing is written until the file has been read and understood, so a file

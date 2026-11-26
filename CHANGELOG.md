@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An opt-in `wifi_lock` experiment for the access point that drops a phone
+  with no uplink (#11): while a listener that needs Wi-Fi is bound, the service
+  holds a `WifiLock` — `WIFI_MODE_FULL_LOW_LATENCY` on Android 14+,
+  `WIFI_MODE_FULL_HIGH_PERF` before that — and releases it when the listener
+  pauses, stops or the service goes away. It is off by default, is visible in
+  `dumpsys` as `wifi_lock held|not held`, and is not a promised fix: Android 14
+  only honours low latency with the screen on and the app in the foreground,
+  and the lock costs battery. A listener started with `any_network` does not
+  hold it.
 - `docs/pre-unlock-autostart.md`: the four Android gates behind the DokeOS Auto
   Start Management list that keep an app from being started before the first
   unlock on this firmware, each with its symptom, the offending log line and
