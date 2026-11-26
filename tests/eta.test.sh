@@ -23,6 +23,19 @@ same() { # same GOT WANT CLAIM
   if [ "$1" = "$2" ]; then ok "$3"; else bad "$3" "got '$1', wanted '$2'"; fi
 }
 
+# The ticker speaks on its own clock, so a fixed sleep is a guess at when its
+# line lands. Poll for the lines instead, with a bound that still fails when the
+# ticker never starts or never says what the claim expects.
+wait_for() { # wait_for FILE PATTERN [COUNT]
+  local file=$1 pattern=$2 count=${3:-1} n i
+  for ((i = 0; i < 100; i++)); do
+    n=$(grep -cE -- "$pattern" "$file" 2>/dev/null) || n=0
+    [ "${n:-0}" -ge "$count" ] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+
 # Three runs of two steps, plus the run's own row — which is not a step.
 cat >"$TMP/timings.csv" <<'EOF'
 run,step,seconds,passed,failed,status
@@ -112,14 +125,14 @@ same "$rest" 1 'how many are after it'
 same "$started" 5000 'and when it began'
 
 # The ticker itself: one line a second, reading the mark the way the run writes.
+# The ticker starts with the mark already in place, so its first line is that
+# step; waiting for the line rather than sleeping a fixed second is what keeps
+# the claim off how loaded the machine is.
 ETA_STATE=$TMP/state
+eta_mark rename 5000
 eta_ticker "$TMP/state" 1 >"$TMP/ticks" 2>&1 &
 ticker=$!
-sleep 1
-ETA_STATE=$TMP/state
-eta_mark panel 0
-printf 'x' >/dev/null
-sleep 2
+wait_for "$TMP/ticks" '^eta ' || :
 kill "$ticker" 2>/dev/null
 wait "$ticker" 2>/dev/null
 line=$(grep '^eta ' "$TMP/ticks" | head -1)
@@ -132,13 +145,16 @@ case $line in
   *) bad 'and how many steps follow, in words that fit' "$line" ;;
 esac
 
+# A mark that started at 0 reads as long past its estimate: the ticker says so
+# instead of claiming the step has nothing left.
 ETA_STATE=$TMP/state
+eta_mark panel 0
 eta_ticker "$TMP/state" 1 >"$TMP/ticks2" 2>&1 &
 ticker=$!
-sleep 2
+wait_for "$TMP/ticks2" 'over its estimate' || :
 kill "$ticker" 2>/dev/null
 wait "$ticker" 2>/dev/null
-over=$(tail -1 "$TMP/ticks2")
+over=$(grep 'over its estimate' "$TMP/ticks2" | head -1)
 case $over in
   *'over its estimate'*) ok 'a step past its estimate says so instead of claiming none is left' ;;
   *) bad 'a step past its estimate says so instead of claiming none is left' "$over" ;;
@@ -180,7 +196,9 @@ ETA_SLOW_MS=500
 eta_mark panel "$(($(date +%s%3N) - 4000))"
 eta_ticker "$TMP/state" 1 >"$TMP/ticks3" 2>&1 &
 ticker=$!
-sleep 3
+# Two ticks: the warning is on the first, the second is what proves it was not
+# repeated. Waiting for them keeps the "said once" claim off a fixed sleep.
+wait_for "$TMP/ticks3" '^eta ' 2 || :
 kill "$ticker" 2>/dev/null
 wait "$ticker" 2>/dev/null
 ETA_SLOW_MS=30000
