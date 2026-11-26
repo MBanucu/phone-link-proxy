@@ -1,0 +1,4 @@
+Asks for cellular again after the network is unavailable or loses internet,
+so a proxy started before mobile data recovers without a restart, and names
+the cellular egress in a failed CONNECT. Corrects the credential and
+any-network documentation.
