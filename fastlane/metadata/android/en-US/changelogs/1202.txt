@@ -1,0 +1,4 @@
+Raises the SOCKS listener from 32 to 128 concurrent connections and reaps
+half-closed relays, so a full-device tunnel no longer stalls until the proxy
+is restarted. A client over the ceiling is refused immediately instead of
+being queued.
