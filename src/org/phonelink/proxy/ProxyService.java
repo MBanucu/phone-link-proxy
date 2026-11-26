@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -65,6 +66,9 @@ public final class ProxyService extends Service implements Port.Host {
     private Ports ports;
 
     private PowerManager.WakeLock wakeLock;
+    private WifiManager.WifiLock wifiLock;
+    /** One log line, not one per state change, when the lock cannot be held. */
+    private boolean wifiLockWarned;
     private NotificationManager notifications;
     private Egress egress;
     private ProxyConfig config;
@@ -87,6 +91,22 @@ public final class ProxyService extends Service implements Port.Host {
         // A reference-counted lock would need exactly as many releases as
         // acquires; this one is held while at least one client is connected.
         wakeLock.setReferenceCounted(false);
+
+        WifiManager wifi = getSystemService(WifiManager.class);
+        if (wifi == null) {
+            wifiLockWarned = true;
+            Log.w(TAG, "no WifiManager; wifi_lock will be ignored");
+        } else {
+            try {
+                // Not reference counted either: the lock follows the listeners,
+                // and one acquire or release per change is all this needs.
+                wifiLock = wifi.createWifiLock(wifiLockMode(), "phone-link:proxy");
+                wifiLock.setReferenceCounted(false);
+            } catch (SecurityException e) {
+                wifiLockWarned = true;
+                Log.w(TAG, "cannot create the Wi-Fi lock; the listener still runs", e);
+            }
+        }
 
         NotificationChannel channel =
                 new NotificationChannel(CHANNEL, getString(R.string.channel_name),
@@ -202,6 +222,7 @@ public final class ProxyService extends Service implements Port.Host {
     public void onDestroy() {
         // Closing the last port closes the egress with it.
         ports.stop(null, false, 0);
+        updateWifiLock();
         closeEgress();
         // Nothing that happens after this is about the listeners that just went.
         EventLog.setActiveTag(null);
@@ -260,6 +281,9 @@ public final class ProxyService extends Service implements Port.Host {
         writer.println("  auto-start  " + ConfigStore.autoStart(this));
         writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
                 + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");
+        writer.println("  wifi_lock   " + (wifiLock != null && wifiLock.isHeld()
+                ? "held" : "not held")
+                + " · setting " + (ConfigStore.wifiLock(this) ? "on" : "off"));
         // What the Quick Settings tile switches: the saved proxies whose switch
         // is on, and how far a click reaches in each direction.
         List<String> bound = ConfigStore.tileProfiles(this);
@@ -327,6 +351,9 @@ public final class ProxyService extends Service implements Port.Host {
 
     @Override
     public void changed() {
+        // A port binds or pauses here, and a connection thread calls this with
+        // the last client; both can change whether a Wi-Fi lock is wanted.
+        updateWifiLock();
         publishAll();
     }
 
@@ -342,6 +369,7 @@ public final class ProxyService extends Service implements Port.Host {
         ports.remove(port);
         port.close();
         holdWakeLock(ports.totalClients() > 0);
+        updateWifiLock();
         if (ports.isEmpty()) {
             closeEgress();
             stopSelf();
@@ -367,6 +395,7 @@ public final class ProxyService extends Service implements Port.Host {
         EventLog.setActiveTag(name);
         Log.i(TAG, "starting " + port.label() + " on port " + config.port);
         EventLog.addTo(name, "starting on port " + config.port);
+        updateWifiLock();
         publishAll();
         port.watch();
     }
@@ -392,6 +421,7 @@ public final class ProxyService extends Service implements Port.Host {
             EventLog.addTo(each.name(), "stopped listening on port " + each.config().port);
         }
         holdWakeLock(ports.totalClients() > 0);
+        updateWifiLock();
         if (ports.isEmpty()) {
             closeEgress();
             stopSelf();
@@ -420,6 +450,61 @@ public final class ProxyService extends Service implements Port.Host {
         }
     }
 
+    /**
+     * Android 14 maps the deprecated high-performance request to low latency by
+     * default, and low latency is only honoured while Wi-Fi is connected, the
+     * screen is on and the app has foreground importance — which a foreground
+     * service does not give it. Asking for low latency on 34+ says what the
+     * platform will actually do; older versions still know high performance.
+     */
+    @SuppressWarnings("deprecation")
+    private static int wifiLockMode() {
+        // The deprecation is the point: 29–33 know only this mode, and 34+
+        // would convert it to low latency anyway.
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+                ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+    }
+
+    /**
+     * Follow the listeners: hold the Wi-Fi lock while the switch is on and a
+     * listener that needs Wi-Fi is actually bound. Called from connection
+     * threads as well as the main thread, so acquires and releases are
+     * serialised here rather than left to race.
+     */
+    private synchronized void updateWifiLock() {
+        List<WifiLockPolicy.Listener> listeners = new ArrayList<>();
+        for (Port each : ports.all()) {
+            listeners.add(new WifiLockPolicy.Listener(
+                    each.state().listening, each.config().anyNetwork));
+        }
+        boolean wanted = WifiLockPolicy.hold(ConfigStore.wifiLock(this), listeners);
+        if (wifiLock == null) {
+            if (wanted && !wifiLockWarned) {
+                wifiLockWarned = true;
+                Log.w(TAG, "wifi_lock is on but this phone has no usable Wi-Fi lock;"
+                        + " the listener runs without it");
+            }
+            return;
+        }
+        if (wanted == wifiLock.isHeld()) {
+            return;
+        }
+        try {
+            if (wanted) {
+                wifiLock.acquire();
+                Log.i(TAG, "holding the Wi-Fi lock while a Wi-Fi listener is bound");
+            } else {
+                wifiLock.release();
+                Log.i(TAG, "released the Wi-Fi lock");
+            }
+        } catch (SecurityException e) {
+            // The listener is the point; a lock the system refuses is a note in
+            // the log, not a reason to stop serving.
+            Log.w(TAG, "cannot hold the Wi-Fi lock; the listener still runs", e);
+        }
+    }
+
     // -- saved configurations --------------------------------------------
 
     /**
@@ -437,7 +522,8 @@ public final class ProxyService extends Service implements Port.Host {
             return;
         }
         ConfigStore.saveProfile(this, name, ConfigStore.load(this),
-                ConfigStore.autoStart(this), ConfigStore.adbWireless(this));
+                ConfigStore.autoStart(this), ConfigStore.adbWireless(this),
+                ConfigStore.wifiLock(this));
         EventLog.addTo(name, "saved configuration \"" + name + "\"");
         Log.i(TAG, "saved configuration \"" + name + "\"");
         if (first && ports.isEmpty()) {

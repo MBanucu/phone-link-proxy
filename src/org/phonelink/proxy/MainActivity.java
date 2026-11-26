@@ -69,16 +69,18 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
     private ProxyScreen page;
 
     /**
-     * The two preferences behind the checkboxes can also be changed over adb
-     * ({@code --ez auto_start …}, {@code --ez adb_wifi …}), so the panel follows
-     * the store instead of trusting what it wrote itself.
+     * The service preferences behind the checkboxes can also be changed over
+     * adb ({@code --ez auto_start …}, {@code --ez adb_wifi …},
+     * {@code --ez wifi_lock …}), so the panel follows the store instead of
+     * trusting what it wrote itself.
      */
     private final SharedPreferences.OnSharedPreferenceChangeListener preferences =
             (sharedPreferences, key) -> runOnUiThread(() -> {
                 if (ConfigStore.KEY_ADB_WIFI.equals(key)) {
                     page.syncSwitches();
                     page.renderAdbState();
-                } else if (ConfigStore.KEY_AUTO_START.equals(key)) {
+                } else if (ConfigStore.KEY_AUTO_START.equals(key)
+                        || ConfigStore.KEY_WIFI_LOCK.equals(key)) {
                     page.syncSwitches();
                 } else if (ConfigStore.KEY_SELECTED_PROFILE.equals(key)) {
                     return;
@@ -237,6 +239,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         info(R.id.info_any_network, R.string.info_any_network_title, R.string.info_any_network);
         info(R.id.info_auto_start, R.string.info_auto_start_title, R.string.info_auto_start);
         info(R.id.info_adb_wifi, R.string.info_adb_wifi_title, R.string.info_adb_wifi);
+        info(R.id.info_wifi_lock, R.string.info_wifi_lock_title, R.string.info_wifi_lock);
         info(R.id.info_tile, R.string.info_tile_title, R.string.info_tile);
         info(R.id.info_save, R.string.info_save_title, R.string.info_save);
         info(R.id.info_save_service, R.string.info_save_title, R.string.info_save);
@@ -304,7 +307,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
     private void storeProfile(String name, ProxyConfig config) {
         ConfigStore.saveProfile(this, name, config, page.autoStartChecked(),
-                page.adbWirelessChecked());
+                page.adbWirelessChecked(), page.wifiLockChecked());
         EventLog.addTo(name, "saved configuration \"" + name + "\"");
         ConfigStore.setSelectedProfile(this, name);
         home.render();
@@ -328,7 +331,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         ProxyConfig seed = ProxyConfig.raw(nextFreePort(base.port), base.user, base.password,
                 base.ssid, base.anyNetwork, base.anonymous);
         ConfigStore.saveProfile(this, name, seed, ConfigStore.autoStart(this),
-                ConfigStore.adbWireless(this));
+                ConfigStore.adbWireless(this), ConfigStore.wifiLock(this));
         EventLog.addTo(name, "created \"" + name + "\"");
         Toast.makeText(this, getString(R.string.new_created, name), Toast.LENGTH_LONG).show();
         home.render();
@@ -890,10 +893,11 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
             return;
         }
         ConfigStore.saveProfile(this, name, config, page.autoStartChecked(),
-                page.adbWirelessChecked());
+                page.adbWirelessChecked(), page.wifiLockChecked());
         ConfigStore.save(this, config);
         ConfigStore.setAutoStart(this, page.autoStartChecked());
         ConfigStore.setAdbWireless(this, page.adbWirelessChecked());
+        ConfigStore.setWifiLock(this, page.wifiLockChecked());
         ConfigStore.setInUse(this, name);
         home.render();
         page.renderPending();

@@ -34,6 +34,7 @@ final class ConfigStore {
     static final String EXTRA_ANY_NETWORK = "any_network";
     static final String EXTRA_AUTO_START = "auto_start";
     static final String EXTRA_ADB_WIFI = "adb_wifi";
+    static final String EXTRA_WIFI_LOCK = "wifi_lock";
     /** The saved configuration to start with, see {@link #resolve}. */
     static final String EXTRA_PROFILE = "profile";
     /** The new name, for {@link #EXTRA_PROFILE}'s rename. */
@@ -50,6 +51,9 @@ final class ConfigStore {
     // while it is open, through a shared-preferences listener.
     static final String KEY_AUTO_START = "auto_start";
     static final String KEY_ADB_WIFI = "adb_wifi";
+    // The Wi-Fi lock is one lock for the whole service, but this switch follows
+    // a saved configuration like its neighbours so a start can name it too.
+    static final String KEY_WIFI_LOCK = "wifi_lock";
     /** Whether this proxy is one the Quick Settings tile switches. */
     private static final String KEY_TILE = "tile";
     /** What a click on the tile starts, and what it stops, as {@link TileScope}. */
@@ -109,6 +113,20 @@ final class ConfigStore {
     }
 
     /**
+     * Whether a listener should ask Android to keep the Wi-Fi association while
+     * it runs. Off by default: the lock costs battery, and the phone may leave
+     * an access point that has no internet for good reasons of its own.
+     */
+    static boolean wifiLock(Context context) {
+        return prefs(context).getBoolean(KEY_WIFI_LOCK, false);
+    }
+
+    static void setWifiLock(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_WIFI_LOCK, enabled).apply();
+        publishState(context);
+    }
+
+    /**
      * The few facts a check needs while the service is not running.
      *
      * <p>{@code dumpsys activity service} prints nothing for a stopped service,
@@ -126,6 +144,7 @@ final class ConfigStore {
         String inUse = inUse(context);
         text.append("auto_start ").append(autoStart(context)).append('\n');
         text.append("adb_wifi ").append(adbWireless(context)).append('\n');
+        text.append("wifi_lock ").append(wifiLock(context)).append('\n');
         text.append("port ").append(config.port).append('\n');
         text.append("ssid ").append(config.ssid).append('\n');
         text.append("any_network ").append(config.anyNetwork).append('\n');
@@ -237,7 +256,8 @@ final class ConfigStore {
             String name,
             ProxyConfig config,
             boolean autoStart,
-            boolean adbWireless) {
+            boolean adbWireless,
+            boolean wifiLock) {
         Set<String> names = new HashSet<>(profileNames(context));
         names.add(name);
         prefs(context)
@@ -251,6 +271,7 @@ final class ConfigStore {
                 .putBoolean(profileKey(name, KEY_ANY_NETWORK), config.anyNetwork)
                 .putBoolean(profileKey(name, KEY_AUTO_START), autoStart)
                 .putBoolean(profileKey(name, KEY_ADB_WIFI), adbWireless)
+                .putBoolean(profileKey(name, KEY_WIFI_LOCK), wifiLock)
                 .apply();
         publishState(context);
     }
@@ -263,6 +284,11 @@ final class ConfigStore {
     /** Whether the saved configuration manages wireless debugging. */
     static boolean profileAdbWireless(Context context, String name) {
         return prefs(context).getBoolean(profileKey(name, KEY_ADB_WIFI), true);
+    }
+
+    /** Whether the saved configuration asks for the Wi-Fi lock while it runs. */
+    static boolean profileWifiLock(Context context, String name) {
+        return prefs(context).getBoolean(profileKey(name, KEY_WIFI_LOCK), false);
     }
 
     /**
@@ -338,7 +364,7 @@ final class ConfigStore {
             return false;
         }
         saveProfile(context, to, saved, profileAutoStart(context, from),
-                profileAdbWireless(context, from));
+                profileAdbWireless(context, from), profileWifiLock(context, from));
         setProfileTile(context, to, profileTile(context, from));
         deleteProfile(context, from);
         if (from.equals(inUse(context))) {
@@ -366,6 +392,7 @@ final class ConfigStore {
                 .remove(profileKey(name, KEY_ANY_NETWORK))
                 .remove(profileKey(name, KEY_AUTO_START))
                 .remove(profileKey(name, KEY_ADB_WIFI))
+                .remove(profileKey(name, KEY_WIFI_LOCK))
                 .remove(profileKey(name, KEY_TILE))
                 .apply();
         publishState(context);
@@ -392,6 +419,7 @@ final class ConfigStore {
             entry.config = config;
             entry.autoStart = profileAutoStart(context, name);
             entry.adbWireless = profileAdbWireless(context, name);
+            entry.wifiLock = profileWifiLock(context, name);
             entry.tile = profileTile(context, name);
             document.saved.add(entry);
         }
@@ -405,6 +433,7 @@ final class ConfigStore {
             active.config = load(context);
             active.autoStart = autoStart(context);
             active.adbWireless = adbWireless(context);
+            active.wifiLock = wifiLock(context);
             document.active = active;
         }
         return document.write();
@@ -428,13 +457,14 @@ final class ConfigStore {
         }
         for (ProfileDocument.Entry entry : entries) {
             saveProfile(context, entry.name, entry.config, entry.autoStart,
-                    entry.adbWireless);
+                    entry.adbWireless, entry.wifiLock);
             setProfileTile(context, entry.name, entry.tile);
         }
         if (document.active != null) {
             save(context, document.active.config);
             setAutoStart(context, document.active.autoStart);
             setAdbWireless(context, document.active.adbWireless);
+            setWifiLock(context, document.active.wifiLock);
         }
         if (!document.inUse.isEmpty()) {
             setInUse(context, document.inUse);
@@ -513,10 +543,12 @@ final class ConfigStore {
                         "no saved configuration called \"" + name + "\"");
             }
             save(context, saved);
-            // The two service switches belong to a configuration as well; an
-            // explicit --ez auto_start/--ez adb_wifi still overrides them below.
+            // The service switches belong to a configuration as well; an
+            // explicit --ez auto_start/--ez adb_wifi/--ez wifi_lock still
+            // overrides them below.
             setAutoStart(context, profileAutoStart(context, name));
             setAdbWireless(context, profileAdbWireless(context, name));
+            setWifiLock(context, profileWifiLock(context, name));
         }
         ProxyConfig stored = load(context);
         int port = stored.port;
@@ -532,6 +564,10 @@ final class ConfigStore {
         if (intent != null && intent.hasExtra(EXTRA_ADB_WIFI)) {
             setAdbWireless(
                     context, intent.getBooleanExtra(EXTRA_ADB_WIFI, adbWireless(context)));
+        }
+        if (intent != null && intent.hasExtra(EXTRA_WIFI_LOCK)) {
+            setWifiLock(
+                    context, intent.getBooleanExtra(EXTRA_WIFI_LOCK, wifiLock(context)));
         }
 
         if (intent != null) {
