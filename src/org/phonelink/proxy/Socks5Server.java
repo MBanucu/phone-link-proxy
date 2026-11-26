@@ -43,9 +43,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * reports that timeout as {@code host unreachable}, the CONNECT is tried once
  * more with a fresh socket and therefore a fresh source port, which is what
  * recovers the ~1–4% of new connections that stalled for 5 s (#42). A refused
- * connection, a DNS failure or a missing cellular network is final and is not
- * retried. The worst case for one SOCKS CONNECT is
- * {@code CONNECT_ATTEMPTS × CONNECT_TIMEOUT_MS}.
+ * connection or a missing cellular network is final and is not retried; a name
+ * that does not resolve carries the same host-unreachable code and is retried
+ * once, which costs only a second lookup. The worst case for one SOCKS CONNECT
+ * is {@code CONNECT_ATTEMPTS × CONNECT_TIMEOUT_MS}.
  *
  * <p>Deliberately free of Android types: the logger and the upstream are seams,
  * so this class and its tests run on a plain JDK.
@@ -381,8 +382,9 @@ final class Socks5Server implements Closeable {
      * {@link Egress} uses for a timeout, which on the cellular uplink is the
      * carrier dropping the handshake's NAT mapping. Each attempt calls
      * {@link Upstream#connect} afresh, so the retry gets a new socket, a new
-     * source port and therefore a new mapping. A refusal, a DNS failure or a
-     * missing egress network is reported as it is.
+     * source port and therefore a new mapping. A refusal or a missing egress
+     * network is reported as it is; a name that does not resolve shares this
+     * reply code and is simply looked up once more.
      */
     private Socket openUpstream(String host, int port) throws Upstream.Failure {
         for (int attempt = 1; ; attempt++) {
