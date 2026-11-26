@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `Egress` asks for a cellular network again after `onUnavailable`, after the
+  network is lost and after it loses `NET_CAPABILITY_VALIDATED` or
+  `NET_CAPABILITY_INTERNET`, with a bounded backoff (1 s, 2 s, 5 s, 10 s, then
+  every 30 s) while the service runs. `describe()` says why there is no usable
+  cellular egress — unavailable, lost or waiting — and a CONNECT that times out
+  names cellular egress instead of failing silently until the service restarts.
+
 ## [0.12.0] - 2026-11-26
 
 ### Added
@@ -54,8 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Socks5Server` closes the socket when `bind()` fails, and the accept loop no
   longer has a null-server race. The relay pool is bounded at 32 concurrent
   connections.
-- `Egress` retries a cellular request after `onUnavailable` and reports loss of
-  the validated network instead of waiting forever.
 - The tracked `debug.keystore` is gone; `build.sh` generates a per-checkout dev
   key under `build/` and preserves it across rebuilds.
 
