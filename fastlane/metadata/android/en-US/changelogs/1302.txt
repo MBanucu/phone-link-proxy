@@ -1,0 +1,3 @@
+A connection now closes within a second even when the peer has vanished, instead
+of leaving an orphaned socket behind. Those orphans made roughly 1 in 100 new
+connections hang for up to 20 seconds when a client reused the same port.

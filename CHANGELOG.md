@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.2] - 2026-11-26
+
+### Fixed
+
+- A finished connection is closed within a second (`SO_LINGER` 1 s) instead of
+  possibly leaving an orphaned `FIN_WAIT1`/`LAST_ACK` socket behind. On the
+  phone those orphans never expire on their own, and a new connection that
+  reused the same 4-tuple was answered with a challenge ACK instead of a
+  SYN-ACK, so it hung until the client's timeout: 5 of 300 bare connects to
+  the listener, 5 of 5 of them reproducing on the same source port, while a
+  fresh port connected in 0.1 s (phone-link#32).
+
 ## [0.13.1] - 2026-11-26
 
 ### Fixed
