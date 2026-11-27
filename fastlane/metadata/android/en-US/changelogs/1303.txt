@@ -1,0 +1,4 @@
+The proxy now keeps its upstream on cellular even when the phone's Wi-Fi is the
+default, and refuses a non-cellular egress instead of opening a socket that
+would loop back into the laptop. The proxy still binds every upstream to the
+cellular link, so the hairpin cannot feed itself.
