@@ -196,7 +196,8 @@ final class ProfileTransfer {
                 try {
                     document = source.document();
                 } catch (RuntimeException e) {
-                    throw new Failure("io", "cannot read the saved proxies");
+                    refuse(out, "io", "cannot read the saved proxies");
+                    return;
                 }
                 byte[] body = bytes(document);
                 if (body.length == 0 || body.length > MAX_DOCUMENT_BYTES) {
