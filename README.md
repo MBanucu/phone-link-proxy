@@ -886,27 +886,31 @@ sends `PLX1 <token>\nPUT <n>\n` and the body, and the app answers
 the token in constant time and then closes the socket and the action. An
 unknown action or bad extra fails closed instead of falling through to a start.
 
-The gate is the screen: **both actions only run while the phone is unlocked**
-(`KeyguardManager.isKeyguardLocked()` false). A locked phone binds nothing and
-answers with a notification and a log line, so the laptop's connect fails —
-that is the intended answer, not a bug. The document is at most 1 MiB, at most
+The gate is the screen: **both actions only run while the screen is on and the
+keyguard is not locked** (`PowerManager.isInteractive()` true and
+`KeyguardManager.isKeyguardLocked()` false). A phone with the screen off or a
+locked keyguard binds nothing and answers with a notification and a log line,
+so the laptop's connect fails — that is the intended answer, not a bug. The
+document is at most 1 MiB, at most
 256 saved proxies, and every entry is validated as a start would validate it
 (port `1024..65535`, connection ceiling `16..1024`, user and password unless
 `anonymous`, an SSID unless `any_network`, a non-empty name of at most 255
 bytes) before the first write. A bad document applies nothing; an import
 replaces the store, like the menu's *replace*, so it is not a merge.
 
-Nothing is written on the phone: no `state.txt`, no export file, no cache. The
-document only crosses the loopback socket. Error messages on the wire are
+No export file, cache or document is written on the phone: the ordinary,
+credential-free `state.txt` the service already maintains is still updated, but
+the document only crosses the loopback socket. Error messages on the wire are
 generic so a parser message cannot quote a line of the file, and the app never
 logs document contents or the token. (The token is on the `am` command line by
 design; it is one-shot and useless after the connection. A password never is.)
 
 The residual risk is adb itself: anyone who can run `adb shell` on the phone
-while it is unlocked can already start a listener, read the app's preferences
-through a debug build, or use the panel. This adds no new principal; it removes
-the plain-text file on the phone and the hand-typed export. Locking the screen
-before walking away is what closes the adb path, exactly as it does for `START`.
+while the screen is on and unlocked can already start a listener, read the app's
+preferences through a debug build, or use the panel. This adds no new principal;
+it removes the plain-text file on the phone and the hand-typed export. Locking
+the screen and turning it off before walking away is what closes the adb path,
+exactly as it does for `START`.
 
 The format is JSON, `{"app": "phone-link-proxy", "version": 1, "active": …, "saved": […]}`,
 written field-per-line by `ProfileDocument` and read by the same class, so it is

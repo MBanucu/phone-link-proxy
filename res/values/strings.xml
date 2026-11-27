@@ -70,8 +70,9 @@
     <string name="error_profile_missing">no saved configuration called \"%1$s\"</string>
     <string name="error_profile_exists">a configuration called \"%1$s\" already exists</string>
     <string name="error_transfer_extras">export/import needs --ei port N --es token TOKEN (the transfer port, not the proxy\'s)</string>
-    <string name="error_transfer_locked">the phone is locked: unlock it and run the export or import again</string>
+    <string name="error_transfer_locked">the screen is off or the phone is locked: unlock it, turn the screen on and run the export or import again</string>
     <string name="error_transfer_busy">another export or import is already running</string>
+    <string name="error_transfer_failed">the phone could not start the export or import</string>
     <string name="error_unknown_action">unknown action \"%1$s\"</string>
     <string name="error_background_start">the phone refused a background start: set Location to \"Allow all the time\" for this app, or open the app and press Start</string>
     <string name="label_port">Port</string>

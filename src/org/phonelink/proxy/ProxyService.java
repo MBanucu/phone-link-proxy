@@ -87,7 +87,7 @@ public final class ProxyService extends Service implements Port.Host {
     /** Whether this instance has already been asked to do something. */
     private boolean startedBefore;
     /** One export or import at a time; the second one fails closed. */
-    private boolean transferring;
+    private final TransferGate transferring = new TransferGate();
     /** Wireless debugging is a switch of the whole app, and one start is enough. */
     private boolean adbTouched;
     /**
@@ -721,20 +721,24 @@ public final class ProxyService extends Service implements Port.Host {
             }
             return;
         }
-        if (transferring) {
-            // Never stop the service here: the first transfer is still using it.
-            reportFailure(getString(R.string.error_transfer_busy));
-            return;
-        }
+        // "Unlocked" means the screen is on and the keyguard is not: a phone
+        // with no secure lock still has an off screen, and a socket must not
+        // exist behind it.
+        PowerManager power = getSystemService(PowerManager.class);
         KeyguardManager keyguard = getSystemService(KeyguardManager.class);
-        if (keyguard == null || keyguard.isKeyguardLocked()) {
+        if (power == null || !power.isInteractive()
+                || keyguard == null || keyguard.isKeyguardLocked()) {
             reportFailure(getString(R.string.error_transfer_locked));
             if (ports.isEmpty()) {
                 stopSelf();
             }
             return;
         }
-        transferring = true;
+        if (!transferring.begin()) {
+            // Never stop the service here: the first transfer is still using it.
+            reportFailure(getString(R.string.error_transfer_busy));
+            return;
+        }
         final int[] applied = {0};
         Thread worker = new Thread(() -> {
             String what = exporting ? "export" : "import";
@@ -762,7 +766,7 @@ public final class ProxyService extends Service implements Port.Host {
                 Log.e(TAG, what + " transfer failed: " + e.getClass().getSimpleName());
                 EventLog.add(what + " transfer failed");
             } finally {
-                transferring = false;
+                transferring.end();
                 if (ports.isEmpty()) {
                     stopSelf(startId);
                 } else {
@@ -771,7 +775,12 @@ public final class ProxyService extends Service implements Port.Host {
             }
         }, "proxy-profile-transfer");
         worker.setDaemon(true);
-        worker.start();
+        try {
+            worker.start();
+        } catch (RuntimeException e) {
+            transferring.end();
+            reportFailure(getString(R.string.error_transfer_failed));
+        }
     }
 
     // -- the notifications ------------------------------------------------

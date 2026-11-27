@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -1497,6 +1498,39 @@ public final class ProxyAppTest {
         });
 
         // -- the adb transfer ---------------------------------------------
+
+        test("one transfer gate admits a single worker", () -> {
+            TransferGate gate = new TransferGate();
+            assertTrue(gate.begin(), "the first claim");
+            assertFalse(gate.begin(), "a second claim while busy");
+            gate.end();
+            assertTrue(gate.begin(), "a claim after the first ends");
+            gate.end();
+
+            TransferGate raced = new TransferGate();
+            AtomicInteger admitted = new AtomicInteger();
+            CountDownLatch ready = new CountDownLatch(1);
+            List<Thread> threads = new ArrayList<>();
+            for (int index = 0; index < 8; index++) {
+                Thread worker = new Thread(() -> {
+                    try {
+                        ready.await();
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    if (raced.begin()) {
+                        admitted.incrementAndGet();
+                    }
+                }, "gate-" + index);
+                worker.start();
+                threads.add(worker);
+            }
+            ready.countDown();
+            for (Thread worker : threads) {
+                worker.join(TIMEOUT_MS);
+            }
+            assertEqual(1, admitted.get(), "exactly one worker was admitted");
+        });
 
         test("a token has to be printable, non-empty and short", () -> {
             assertTrue(ProfileTransfer.validToken("0123456789abcdef"), "a hex token");
