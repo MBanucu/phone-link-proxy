@@ -867,8 +867,50 @@ that is not one of ours says so instead of leaving a half-imported store.
 
 This is the answer to the two ways a phone loses them: changing the signing key
 (`phone-proxy-install --replace-signer` uninstalls first) and a lost or reset
-phone. adb cannot do it: the contract deliberately never prints a password, so a
-`dumpsys`-based export would bring back proxies that cannot connect.
+phone. The laptop does it without the picker:
+
+```sh
+adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
+    -a org.phonelink.proxy.action.EXPORT --ei port 47123 --es token 6f3c…
+adb forward tcp:0 tcp:47123          # prints the laptop's port
+# then, on 127.0.0.1:<that port>:
+#   client → PLX1 <token>\n
+#   app    → OK <n>\n + n bytes of the JSON above
+```
+
+`IMPORT` is the same socket with the document going the other way: the laptop
+sends `PLX1 <token>\nPUT <n>\n` and the body, and the app answers
+`OK <count>\n`. Errors are `ERR <code> <message>\n` with `bad-token`,
+`too-large`, `bad-document`, `busy`, `timeout` or `io`. The app binds
+`127.0.0.1` only, accepts exactly one connection, gives it 60 seconds, compares
+the token in constant time and then closes the socket and the action. An
+unknown action or bad extra fails closed instead of falling through to a start.
+
+The gate is the screen: **both actions only run while the screen is on and the
+keyguard is not locked** (`PowerManager.isInteractive()` true and
+`KeyguardManager.isKeyguardLocked()` false). A phone with the screen off or a
+locked keyguard binds nothing and answers with a notification and a log line,
+so the laptop's connect fails — that is the intended answer, not a bug. The
+document is at most 1 MiB, at most
+256 saved proxies, and every entry is validated as a start would validate it
+(port `1024..65535`, connection ceiling `16..1024`, user and password unless
+`anonymous`, an SSID unless `any_network`, a non-empty name of at most 255
+bytes) before the first write. A bad document applies nothing; an import
+replaces the store, like the menu's *replace*, so it is not a merge.
+
+No export file, cache or document is written on the phone: the ordinary,
+credential-free `state.txt` the service already maintains is still updated, but
+the document only crosses the loopback socket. Error messages on the wire are
+generic so a parser message cannot quote a line of the file, and the app never
+logs document contents or the token. (The token is on the `am` command line by
+design; it is one-shot and useless after the connection. A password never is.)
+
+The residual risk is adb itself: anyone who can run `adb shell` on the phone
+while the screen is on and unlocked can already start a listener, read the app's
+preferences through a debug build, or use the panel. This adds no new principal;
+it removes the plain-text file on the phone and the hand-typed export. Locking
+the screen and turning it off before walking away is what closes the adb path,
+exactly as it does for `START`.
 
 The format is JSON, `{"app": "phone-link-proxy", "version": 1, "active": …, "saved": […]}`,
 written field-per-line by `ProfileDocument` and read by the same class, so it is
