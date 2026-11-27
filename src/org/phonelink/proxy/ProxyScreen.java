@@ -339,14 +339,15 @@ final class ProxyScreen {
     /**
      * The DokeOS gate, on its own line: unknown and unreadable, or a dated
      * suspicion. Never "clear" — the vendor list is behind a signature
-     * permission this app does not hold.
+     * permission this app does not hold. The persisted fact is only "no boot
+     * broadcast"; the words here are the interpretation.
      *
-     * @param blockedAt epoch seconds of the first observation after a boot
-     *                  whose broadcast never arrived, or 0 when there is none
-     * @param noticed   that instant in the phone's locale, or null when empty
+     * @param missedAt epoch seconds of the first observation after a boot
+     *                 whose broadcast never arrived, or 0 when there is none
+     * @param noticed  that instant in the phone's locale, or null when empty
      */
-    void renderOemAutostart(long blockedAt, String noticed) {
-        boolean likelyBlocked = blockedAt > 0 && noticed != null;
+    void renderOemAutostart(long missedAt, String noticed) {
+        boolean likelyBlocked = missedAt > 0 && noticed != null;
         if (likelyBlocked) {
             oemAutostart.setText(
                     activity.getString(R.string.oem_autostart_blocked, noticed));

@@ -313,6 +313,10 @@ public final class ProxyService extends Service implements Port.Host {
         // the only honest answer from a running service is that it is unknown.
         writer.println("  oem_autostart " + BootGate.UNREADABLE
                 + " (DokeOS list is signature-protected)");
+        long missedAt = ConfigStore.bootMissedAt(this);
+        if (missedAt > 0) {
+            writer.println("  last_boot   no_broadcast " + missedAt);
+        }
         writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
                 + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");
         writer.println("  wifi_lock   " + (wifiLock != null && wifiLock.isHeld()

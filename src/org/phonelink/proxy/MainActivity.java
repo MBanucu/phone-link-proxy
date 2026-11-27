@@ -816,11 +816,11 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         page.renderBattery(exempt, warningNow);
         warning.setVisibility(warningNow ? View.VISIBLE : View.GONE);
 
-        long blockedAt = ConfigStore.bootBlockedAt(this);
-        page.renderOemAutostart(blockedAt, blockedAt > 0 ? noticedAt(blockedAt) : null);
+        long missedAt = ConfigStore.bootMissedAt(this);
+        page.renderOemAutostart(missedAt, missedAt > 0 ? noticedAt(missedAt) : null);
     }
 
-    /** The suspicion's timestamp, in the phone's locale; it is when the app noticed. */
+    /** The observation's timestamp, in the phone's locale; it is when the app noticed. */
     private String noticedAt(long epochSeconds) {
         java.text.DateFormat format = java.text.DateFormat.getDateTimeInstance(
                 java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT);

@@ -875,6 +875,8 @@ public final class ProxyAppTest {
                     "help does not name the accessibility driver");
             assertTrue(text.contains("likely blocked this boot"),
                     "help does not describe the dated suspicion");
+            assertTrue(text.contains("last_boot no_broadcast <epoch>"),
+                    "help does not name the observation it persists");
             assertTrue(text.contains("never as clear"),
                     "help does not say the vendor gate is never clear");
         });
@@ -973,24 +975,28 @@ public final class ProxyAppTest {
             assertEqual("oem_autostart unreadable", BootGate.stateText(0),
                     "the vendor gate is not reported as clear");
             assertFalse(BootGate.stateText(0).contains("last_boot"),
-                    "a clean install has no blocked-boot claim");
+                    "a clean install has no missed-boot claim");
         });
 
-        test("a missed boot is a dated suspicion only with auto-start on", () -> {
+        test("a missed boot is a dated observation only with auto-start on", () -> {
             long seen = 41;
             assertTrue(BootGate.missedThisBoot(42, seen), "a newer boot was missed");
             assertFalse(BootGate.missedThisBoot(seen, seen), "the receiver saw this boot");
             assertFalse(BootGate.missedThisBoot(42, -1), "a clean install has no marker");
-            assertEqual(0, (int) BootGate.observedBlockedAt(42, seen, false, 0, 1_000),
-                    "auto-start off is not a blocked restart");
-            assertEqual(1_000, (int) BootGate.observedBlockedAt(42, seen, true, 0, 1_000),
-                    "the first look dates the suspicion");
-            assertEqual(1_000, (int) BootGate.observedBlockedAt(43, seen, true, 1_000, 2_000),
+            assertEqual(0, (int) BootGate.observedMissedAt(42, seen, false, 0, 1_000),
+                    "auto-start off is not a missed restart");
+            assertEqual(1_000, (int) BootGate.observedMissedAt(42, seen, true, 0, 1_000),
+                    "the first look dates the observation");
+            assertEqual(1_000, (int) BootGate.observedMissedAt(43, seen, true, 1_000, 2_000),
                     "a later look keeps the first date");
-            assertEqual(0, (int) BootGate.observedBlockedAt(41, seen, true, 1_000, 2_000),
+            assertEqual(0, (int) BootGate.observedMissedAt(41, seen, true, 1_000, 2_000),
                     "the receiver running clears it");
-            assertTrue(BootGate.stateText(1_000).contains("last_boot blocked 1000"),
-                    "the dated suspicion is machine-readable");
+            // The persisted line is the observation, not the conclusion: the
+            // panel and the doctor are where "likely blocked" is earned.
+            assertTrue(BootGate.stateText(1_000).contains("last_boot no_broadcast 1000"),
+                    "the dated observation is machine-readable");
+            assertFalse(BootGate.stateText(1_000).contains("blocked"),
+                    "the state file does not persist the suspicion");
         });
 
         // --- state text ----------------------------------------------------

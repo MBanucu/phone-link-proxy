@@ -722,10 +722,12 @@ line each — `auto_start`, `adb_wifi`, `wifi_lock`, `port`, `ssid`,
 `any_network`, `in_use`, `oem_autostart unreadable` —
 so `phone-doctor` can say what auto-start is set to and what Android's battery
 gate reports for a phone whose service is not running. It also carries
-`last_boot blocked <epoch seconds>` only when the boot gate is worth naming: no
-boot broadcast reached the app in the current boot and auto-start is on. That
-line is the same dated suspicion the panel shows, with the time the app
-noticed. It cannot see the DokeOS list, and the file holds no credentials.
+`last_boot no_broadcast <epoch seconds>` only when the observation is worth
+recording: no boot broadcast reached the app in the current boot and auto-start
+is on. That line states the observation and the time the app noticed, not a
+cause; the panel and `phone-doctor` turn it into the dated "likely blocked"
+wording. It cannot see the DokeOS list, and the file holds no credentials or
+guesses.
 
 Measured on the phone (Android 15): with the switch on, `settings put global
 adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with

@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read, so the line says unreadable and names the screen and the two drivers;
   it never says clear. When auto-start is on and no boot broadcast reached the
   app in the current boot, it says "likely blocked this boot" with the time the
-  app noticed. `state.txt` carries the same facts for `phone-doctor`
-  (`oem_autostart unreadable`, and `last_boot blocked <epoch>` only when
-  earned); `stopped=true` alone is not used as evidence (#5).
+  app noticed. `state.txt` carries the observation, not the conclusion:
+  `oem_autostart unreadable`, and `last_boot no_broadcast <epoch>` only when
+  no boot broadcast reached the app this boot with auto-start on. The "likely
+  blocked" wording lives in the panel and `phone-doctor`; `stopped=true` alone
+  is not used as evidence (#5).
 
 ### Fixed
 
