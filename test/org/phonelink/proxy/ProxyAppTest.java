@@ -5,6 +5,8 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -170,6 +172,231 @@ public final class ProxyAppTest {
                 handshake(socket);
                 requestConnect(socket, 0x02, 0x01, "127.0.0.1", 80);
                 assertEqual(Socks5Server.REPLY_COMMAND_NOT_SUPPORTED, readReply(socket), "reply code");
+            }
+        });
+
+        // --- UDP ASSOCIATE --------------------------------------------------
+
+        test("a UDP request and a reply use the SOCKS5 header for IPv4 and IPv6", () -> {
+            byte[] payload = "quic".getBytes(StandardCharsets.UTF_8);
+            InetAddress v4 = InetAddress.getByName("192.0.2.7");
+            byte[] request = udpRequest(v4, 443, payload, 0);
+            Socks5Server.UdpPacket parsed = Socks5Server.UdpPacket.parse(
+                    request, request.length, Socks5Server.UDP_MAX_DATAGRAM);
+            assertTrue(parsed != null, "an IPv4 request was dropped");
+            assertTrue(v4.equals(parsed.address), "IPv4 address");
+            assertEqual(443, parsed.port, "IPv4 port");
+            assertEqual("quic", new String(
+                    Arrays.copyOfRange(request, parsed.offset, request.length),
+                    StandardCharsets.UTF_8), "IPv4 payload");
+
+            InetAddress v6 = InetAddress.getByName("2001:db8::7");
+            byte[] six = udpRequest(v6, 53, payload, 0);
+            assertEqual(0x04, six[3] & 0xFF, "IPv6 address type");
+            parsed = Socks5Server.UdpPacket.parse(
+                    six, six.length, Socks5Server.UDP_MAX_DATAGRAM);
+            assertTrue(parsed != null, "an IPv6 request was dropped");
+            assertTrue(v6.equals(parsed.address), "IPv6 address");
+            assertEqual(53, parsed.port, "IPv6 port");
+
+            byte[] named = udpRequest("dns.example", 53, payload, 0);
+            assertEqual(0x03, named[3] & 0xFF, "domain address type");
+            parsed = Socks5Server.UdpPacket.parse(
+                    named, named.length, Socks5Server.UDP_MAX_DATAGRAM);
+            assertTrue(parsed != null, "a domain request was dropped");
+            assertEqual("dns.example", parsed.host, "domain name");
+            assertTrue(parsed.address == null, "a domain is not resolved while parsing");
+
+            byte[] reply = Socks5Server.UdpPacket.encode(
+                    v6, 443, payload, payload.length, Socks5Server.UDP_MAX_DATAGRAM);
+            assertTrue(reply != null, "the reply was not encoded");
+            assertEqual(0x04, reply[3] & 0xFF, "an IPv6 source gets an IPv6 reply header");
+            parsed = Socks5Server.UdpPacket.parse(
+                    reply, reply.length, Socks5Server.UDP_MAX_DATAGRAM);
+            assertTrue(parsed != null, "the encoded reply did not parse");
+            assertTrue(v6.equals(parsed.address), "the reply source address");
+            assertEqual(443, parsed.port, "the reply source port");
+            assertTrue(Arrays.equals(payload,
+                    Arrays.copyOfRange(reply, parsed.offset, reply.length)), "the reply payload");
+        });
+
+        test("a fragmented, short or oversized UDP request is dropped", () -> {
+            InetAddress destination = InetAddress.getByName("192.0.2.7");
+            byte[] payload = "hello".getBytes(StandardCharsets.UTF_8);
+
+            byte[] fragmented = udpRequest(destination, 443, payload, 1);
+            assertTrue(Socks5Server.UdpPacket.parse(
+                    fragmented, fragmented.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
+                    "FRAG=1 was accepted");
+
+            byte[] shortPacket = new byte[] {0, 0, 0};
+            assertTrue(Socks5Server.UdpPacket.parse(
+                    shortPacket, shortPacket.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
+                    "a three-byte request was accepted");
+
+            byte[] truncated = Arrays.copyOf(udpRequest(destination, 443, payload, 0), 9);
+            assertTrue(Socks5Server.UdpPacket.parse(
+                    truncated, truncated.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
+                    "an IPv4 header cut before its port was accepted");
+
+            byte[] badType = udpRequest(destination, 443, payload, 0);
+            badType[3] = 0x02;
+            assertTrue(Socks5Server.UdpPacket.parse(
+                    badType, badType.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
+                    "an unknown address type was accepted");
+
+            byte[] oversized = new byte[Socks5Server.UDP_MAX_DATAGRAM + 1];
+            assertTrue(Socks5Server.UdpPacket.parse(
+                    oversized, oversized.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
+                    "a datagram over the cap was accepted");
+            assertTrue(Socks5Server.UdpPacket.encode(
+                    destination, 443, new byte[100], 100, 64) == null,
+                    "an encoded reply over the cap was accepted");
+        });
+
+        test("UDP ASSOCIATE relays a datagram through a real UDP echo", () -> {
+            try (Fixture fixture = new Fixture();
+                    UdpEcho echo = new UdpEcho();
+                    Socket control = fixture.open();
+                    DatagramSocket udp = new DatagramSocket(
+                            0, InetAddress.getLoopbackAddress())) {
+                handshake(control);
+                Reply reply = associate(control);
+                udp.setSoTimeout(TIMEOUT_MS);
+
+                byte[] payload = "udp-through-the-tunnel".getBytes(StandardCharsets.UTF_8);
+                sendUdp(udp, reply.bound, udpRequest(
+                        InetAddress.getByName("127.0.0.1"), echo.port(), payload, 0));
+                byte[] answer = receiveUdp(udp);
+                Socks5Server.UdpPacket parsed = Socks5Server.UdpPacket.parse(
+                        answer, answer.length, Socks5Server.UDP_MAX_DATAGRAM);
+                assertTrue(parsed != null, "the reply did not parse");
+                assertEqual(echo.port(), parsed.port, "the reply comes from the echo port");
+                assertTrue(Arrays.equals(payload,
+                        Arrays.copyOfRange(answer, parsed.offset, answer.length)),
+                        "the payload did not round-trip");
+                assertEqual(1, fixture.clients.get(), "the association is one client");
+            }
+        });
+
+        test("a fragmented or oversized datagram is dropped and the association survives", () -> {
+            try (Fixture fixture = new Fixture(USER, PASSWORD, null,
+                            Socks5Server.MAX_CONNECTIONS, Socks5Server.RELAY_LINGER_MS, 64);
+                    UdpEcho echo = new UdpEcho();
+                    Socket control = fixture.open();
+                    DatagramSocket udp = new DatagramSocket(
+                            0, InetAddress.getLoopbackAddress())) {
+                handshake(control);
+                Reply reply = associate(control);
+                InetAddress destination = InetAddress.getByName("127.0.0.1");
+
+                sendUdp(udp, reply.bound,
+                        udpRequest(destination, echo.port(), new byte[] {1, 2, 3}, 1));
+                assertNoUdp(udp, "a fragmented datagram was relayed");
+
+                sendUdp(udp, reply.bound,
+                        udpRequest(destination, echo.port(), new byte[100], 0));
+                assertNoUdp(udp, "an oversized datagram was relayed");
+
+                // The drops did not take the association down.
+                byte[] payload = "still-here".getBytes(StandardCharsets.UTF_8);
+                sendUdp(udp, reply.bound,
+                        udpRequest(destination, echo.port(), payload, 0));
+                byte[] answer = receiveUdp(udp);
+                Socks5Server.UdpPacket parsed = Socks5Server.UdpPacket.parse(
+                        answer, answer.length, Socks5Server.UDP_MAX_DATAGRAM);
+                assertTrue(parsed != null, "the reply after the drops did not parse");
+                assertTrue(Arrays.equals(payload,
+                        Arrays.copyOfRange(answer, parsed.offset, answer.length)),
+                        "the association stopped relaying after a drop");
+            }
+        });
+
+        test("closing the control connection ends the UDP association", () -> {
+            try (Fixture fixture = new Fixture();
+                    UdpEcho echo = new UdpEcho();
+                    DatagramSocket udp = new DatagramSocket(
+                            0, InetAddress.getLoopbackAddress())) {
+                Socket control = fixture.open();
+                try {
+                    handshake(control);
+                    Reply reply = associate(control);
+                    InetAddress destination = InetAddress.getByName("127.0.0.1");
+                    byte[] payload = "before".getBytes(StandardCharsets.UTF_8);
+                    sendUdp(udp, reply.bound,
+                            udpRequest(destination, echo.port(), payload, 0));
+                    assertTrue(receiveUdp(udp).length > payload.length,
+                            "the association did not relay before the close");
+
+                    control.close();
+                    assertEqual(0, waitForClients(fixture.clients),
+                            "clients after the control close");
+
+                    sendUdp(udp, reply.bound,
+                            udpRequest(destination, echo.port(), payload, 0));
+                    assertNoUdp(udp, "the relay survived its control connection");
+                } finally {
+                    Closeables.closeQuietly(control);
+                }
+            }
+        });
+
+        test("stopping the listener closes every UDP association", () -> {
+            Fixture fixture = new Fixture();
+            try (UdpEcho echo = new UdpEcho();
+                    DatagramSocket udp = new DatagramSocket(
+                            0, InetAddress.getLoopbackAddress())) {
+                Socket control = fixture.open();
+                try {
+                    handshake(control);
+                    Reply reply = associate(control);
+                    InetAddress destination = InetAddress.getByName("127.0.0.1");
+                    byte[] payload = "before-stop".getBytes(StandardCharsets.UTF_8);
+                    sendUdp(udp, reply.bound,
+                            udpRequest(destination, echo.port(), payload, 0));
+                    assertTrue(receiveUdp(udp).length > payload.length,
+                            "the association did not relay before the stop");
+
+                    fixture.server.close();
+                    assertEqual(0, waitForClients(fixture.clients),
+                            "clients after the listener stopped");
+                    assertClosed(control, "the control connection of a stopped listener");
+
+                    sendUdp(udp, reply.bound,
+                            udpRequest(destination, echo.port(), payload, 0));
+                    assertNoUdp(udp, "the relay survived the listener stop");
+                } finally {
+                    Closeables.closeQuietly(control);
+                }
+            } finally {
+                fixture.close();
+            }
+        });
+
+        test("an idle UDP association ends on its own", () -> {
+            long idleMs = 300;
+            try (Fixture fixture = new Fixture(USER, PASSWORD, null,
+                            Socks5Server.MAX_CONNECTIONS, Socks5Server.RELAY_LINGER_MS,
+                            Socks5Server.UDP_MAX_DATAGRAM, Socks5Server.UDP_QUEUE, idleMs);
+                    UdpEcho echo = new UdpEcho();
+                    DatagramSocket udp = new DatagramSocket(
+                            0, InetAddress.getLoopbackAddress())) {
+                Socket control = fixture.open();
+                try {
+                    handshake(control);
+                    Reply reply = associate(control);
+                    InetAddress destination = InetAddress.getByName("127.0.0.1");
+                    byte[] payload = "wake".getBytes(StandardCharsets.UTF_8);
+                    sendUdp(udp, reply.bound,
+                            udpRequest(destination, echo.port(), payload, 0));
+                    receiveUdp(udp);
+
+                    assertEqual(0, waitForClients(fixture.clients),
+                            "clients after the idle timeout");
+                    assertClosed(control, "the control connection of an idle association");
+                } finally {
+                    Closeables.closeQuietly(control);
+                }
             }
         });
 
@@ -623,6 +850,10 @@ public final class ProxyAppTest {
             }
             assertTrue(text.contains("opt-in experiment"),
                     "the help text sells the Wi-Fi lock as a fix");
+            assertTrue(text.contains("UDP ASSOCIATE"),
+                    "the help text does not say UDP is supported");
+            assertTrue(text.contains("BIND is refused"),
+                    "the help text does not say BIND is still refused");
             assertTrue(text.contains("org.phonelink.proxy.action.START"), "no start action");
             assertTrue(text.contains("org.phonelink.proxy.action.STOP"), "no stop action");
             assertTrue(text.contains("org.phonelink.proxy.action.SAVE_PROFILE"),
@@ -1388,26 +1619,113 @@ public final class ProxyAppTest {
     }
 
     private static int readReply(Socket socket) throws IOException {
+        return readReplyFull(socket).code;
+    }
+
+    /** A parsed SOCKS5 reply: the code and the bound address, when it named one. */
+    private static final class Reply {
+        final int code;
+        final InetSocketAddress bound;
+
+        Reply(int code, InetSocketAddress bound) {
+            this.code = code;
+            this.bound = bound;
+        }
+    }
+
+    private static Reply readReplyFull(Socket socket) throws IOException {
         DataInputStream in = new DataInputStream(socket.getInputStream());
         assertEqual(0x05, in.readUnsignedByte(), "reply version");
         int code = in.readUnsignedByte();
         in.readUnsignedByte(); // reserved
         int addressType = in.readUnsignedByte();
+        InetAddress address = null;
         switch (addressType) {
-            case 0x01:
-                in.readFully(new byte[4]);
+            case 0x01: {
+                byte[] raw = new byte[4];
+                in.readFully(raw);
+                address = InetAddress.getByAddress(raw);
                 break;
-            case 0x04:
-                in.readFully(new byte[16]);
+            }
+            case 0x04: {
+                byte[] raw = new byte[16];
+                in.readFully(raw);
+                address = InetAddress.getByAddress(raw);
                 break;
+            }
             case 0x03:
                 in.readFully(new byte[in.readUnsignedByte()]);
                 break;
             default:
                 throw new AssertionError("unexpected reply address type " + addressType);
         }
-        in.readUnsignedShort();
-        return code;
+        int port = in.readUnsignedShort();
+        return new Reply(code, address == null ? null : new InetSocketAddress(address, port));
+    }
+
+    /** Handshake and open one {@code UDP ASSOCIATE}; its reply names the relay. */
+    private static Reply associate(Socket control) throws IOException {
+        requestConnect(control, 0x03, 0x01, "0.0.0.0", 0);
+        Reply reply = readReplyFull(control);
+        assertEqual(0x00, reply.code, "UDP ASSOCIATE reply code");
+        assertTrue(reply.bound != null, "UDP ASSOCIATE named no relay");
+        assertTrue(reply.bound.getPort() > 0, "UDP ASSOCIATE named no port");
+        return reply;
+    }
+
+    /** One SOCKS5 UDP request around an IPv4 or IPv6 destination. */
+    private static byte[] udpRequest(
+            InetAddress destination, int port, byte[] payload, int fragment) {
+        byte[] raw = destination.getAddress();
+        ByteArrayOutputStream request = new ByteArrayOutputStream();
+        request.write(0);
+        request.write(0);
+        request.write(fragment);
+        request.write(raw.length == 4 ? 0x01 : 0x04);
+        request.write(raw, 0, raw.length);
+        request.write((port >> 8) & 0xFF);
+        request.write(port & 0xFF);
+        request.write(payload, 0, payload.length);
+        return request.toByteArray();
+    }
+
+    /** The same with a domain name, which the association resolves on egress. */
+    private static byte[] udpRequest(String host, int port, byte[] payload, int fragment) {
+        byte[] name = host.getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream request = new ByteArrayOutputStream();
+        request.write(0);
+        request.write(0);
+        request.write(fragment);
+        request.write(0x03);
+        request.write(name.length);
+        request.write(name, 0, name.length);
+        request.write((port >> 8) & 0xFF);
+        request.write(port & 0xFF);
+        request.write(payload, 0, payload.length);
+        return request.toByteArray();
+    }
+
+    private static void sendUdp(DatagramSocket socket, InetSocketAddress to, byte[] datagram)
+            throws IOException {
+        socket.send(new DatagramPacket(datagram, datagram.length, to));
+    }
+
+    private static byte[] receiveUdp(DatagramSocket socket) throws IOException {
+        socket.setSoTimeout(TIMEOUT_MS);
+        DatagramPacket packet = new DatagramPacket(new byte[65536], 65536);
+        socket.receive(packet);
+        return Arrays.copyOf(packet.getData(), packet.getLength());
+    }
+
+    private static void assertNoUdp(DatagramSocket socket, String what) throws IOException {
+        socket.setSoTimeout(500);
+        DatagramPacket packet = new DatagramPacket(new byte[1024], 1024);
+        try {
+            socket.receive(packet);
+        } catch (SocketTimeoutException expected) {
+            return;
+        }
+        throw new AssertionError(what);
     }
 
     private static byte[] readFully(InputStream in, int length) throws IOException {
@@ -1443,6 +1761,19 @@ public final class ProxyAppTest {
 
         Fixture(String user, String password, Upstream custom, int maxConnections,
                 long relayLingerMs) throws IOException {
+            this(user, password, custom, maxConnections, relayLingerMs,
+                    Socks5Server.UDP_MAX_DATAGRAM);
+        }
+
+        Fixture(String user, String password, Upstream custom, int maxConnections,
+                long relayLingerMs, int udpMaxDatagram) throws IOException {
+            this(user, password, custom, maxConnections, relayLingerMs, udpMaxDatagram,
+                    Socks5Server.UDP_QUEUE, Socks5Server.UDP_IDLE_MS);
+        }
+
+        Fixture(String user, String password, Upstream custom, int maxConnections,
+                long relayLingerMs, int udpMaxDatagram, int udpQueue, long udpIdleMs)
+                throws IOException {
             upstream = new FakeUpstream();
             server = new Socks5Server(
                     0,
@@ -1453,7 +1784,10 @@ public final class ProxyAppTest {
                     clients::set,
                     message -> { },
                     maxConnections,
-                    relayLingerMs);
+                    relayLingerMs,
+                    udpMaxDatagram,
+                    udpQueue,
+                    udpIdleMs);
             server.start();
             port = server.port();
         }
@@ -1528,6 +1862,29 @@ public final class ProxyAppTest {
             }
         }
 
+        /**
+         * A loopback datagram socket, which is the JVM's stand-in for the
+         * cellular egress: the test's echo backend is on loopback too.
+         */
+        @Override
+        public DatagramSocket datagram() throws Failure {
+            try {
+                return new DatagramSocket(0, InetAddress.getLoopbackAddress());
+            } catch (IOException e) {
+                throw new Failure(Socks5Server.REPLY_GENERAL_FAILURE, e.getMessage());
+            }
+        }
+
+        @Override
+        public InetAddress[] resolve(String host) throws Failure {
+            try {
+                return InetAddress.getAllByName(host);
+            } catch (IOException e) {
+                throw new Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+                        "cannot resolve " + host + ": " + e.getMessage());
+            }
+        }
+
         void close() {
             try {
                 backend.close();
@@ -1564,6 +1921,16 @@ public final class ProxyAppTest {
         }
 
         @Override
+        public DatagramSocket datagram() throws Failure {
+            return delegate.datagram();
+        }
+
+        @Override
+        public InetAddress[] resolve(String host) throws Failure {
+            return delegate.resolve(host);
+        }
+
+        @Override
         public void close() {
             delegate.close();
         }
@@ -1573,8 +1940,7 @@ public final class ProxyAppTest {
      * An origin that keeps its side of the connection open after the client
      * half-closes: the state the old relay waited in forever.
      */
-    private static final class HoldingUpstream implements Upstream, AutoCloseable {
-        private final ServerSocket backend;
+    private static final class HoldingUpstream implements Upstream, AutoCloseable {        private final ServerSocket backend;
         private final Thread thread;
         private final List<Socket> held = new ArrayList<>();
 
@@ -1620,6 +1986,42 @@ public final class ProxyAppTest {
                 }
                 held.clear();
             }
+        }
+    }
+
+    /** A loopback UDP echo origin, so an association can be tested end to end. */
+    private static final class UdpEcho implements AutoCloseable {
+        private final DatagramSocket socket;
+        private final Thread thread;
+
+        UdpEcho() throws IOException {
+            socket = new DatagramSocket(0, InetAddress.getLoopbackAddress());
+            thread = new Thread(this::serve, "udp-echo");
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        private void serve() {
+            byte[] buffer = new byte[8 * 1024];
+            while (!socket.isClosed()) {
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                try {
+                    socket.receive(packet);
+                    socket.send(new DatagramPacket(
+                            packet.getData(), packet.getLength(), packet.getSocketAddress()));
+                } catch (IOException e) {
+                    return;
+                }
+            }
+        }
+
+        int port() {
+            return socket.getLocalPort();
+        }
+
+        @Override
+        public void close() {
+            Closeables.closeQuietly(socket);
         }
     }
 }

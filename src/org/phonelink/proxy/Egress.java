@@ -14,6 +14,7 @@ import android.util.Log;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.ConnectException;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -237,26 +238,7 @@ final class Egress implements Upstream, Closeable {
      */
     @Override
     public Socket connect(String host, int port, int timeoutMs) throws Failure {
-        Network network = awaitCellular();
-        if (network == null) {
-            String reason;
-            synchronized (lock) {
-                reason = state.reason(SystemClock.elapsedRealtime());
-            }
-            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
-                    "no usable cellular egress for " + host + ":" + port + ": " + reason);
-        }
-
-        // The guard: whatever was resolved has to be cellular. A Wi-Fi/AP link
-        // here is the hairpin, and opening the socket would send the request
-        // back to the laptop that made it. Fail closed, with one clear line.
-        String refusal = EgressPolicy.refusal(
-                link(network, manager.getNetworkCapabilities(network)));
-        if (refusal != null) {
-            refuse(network, refusal);
-            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
-                    "refusing " + host + ":" + port + ": " + refusal);
-        }
+        Network network = requireCellular(host + ":" + port);
 
         long deadline = SystemClock.elapsedRealtime() + timeoutMs;
         InetAddress[] addresses;
@@ -290,6 +272,78 @@ final class Egress implements Upstream, Closeable {
         }
         throw new Upstream.Failure(replyFor(last),
                 "cannot reach " + host + ":" + port + " over cellular: " + last);
+    }
+
+    /**
+     * A datagram socket on the cellular egress, for one UDP association.
+     *
+     * <p>Bound to the wildcard and then attached to the {@link Network}, so the
+     * kernel sends from the cellular interface even while the phone's default
+     * route is the laptop's AP. If the resolved network is not cellular the
+     * guard refuses it here exactly as {@link #connect} does; a UDP relay on the
+     * default route would send datagrams back to the laptop.
+     */
+    @Override
+    public DatagramSocket datagram() throws Failure {
+        Network network = requireCellular("a UDP association");
+        DatagramSocket socket = null;
+        try {
+            socket = new DatagramSocket(null);
+            socket.setReuseAddress(true);
+            socket.bind(new InetSocketAddress(0));
+            network.bindSocket(socket);
+            return socket;
+        } catch (IOException e) {
+            Closeables.closeQuietly(socket);
+            throw new Upstream.Failure(Socks5Server.REPLY_GENERAL_FAILURE,
+                    "cannot open a UDP socket on the cellular network: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Resolve a UDP destination name on the cellular network, for the same
+     * reason {@link #connect} does: the system resolver would answer over the
+     * Wi-Fi link, whose DNS server is the laptop.
+     */
+    @Override
+    public InetAddress[] resolve(String host) throws Failure {
+        Network network = requireCellular(host);
+        try {
+            return network.getAllByName(host);
+        } catch (UnknownHostException e) {
+            throw new Upstream.Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+                    "cannot resolve " + host + " on the cellular network");
+        }
+    }
+
+    /**
+     * The cellular network, or the failure that says why it is not usable.
+     *
+     * <p>Shared by CONNECT, UDP and name resolution so none of them can fall
+     * back to the phone's default route without the guard seeing it.
+     */
+    private Network requireCellular(String what) throws Failure {
+        Network network = awaitCellular();
+        if (network == null) {
+            String reason;
+            synchronized (lock) {
+                reason = state.reason(SystemClock.elapsedRealtime());
+            }
+            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
+                    "no usable cellular egress for " + what + ": " + reason);
+        }
+
+        // The guard: whatever was resolved has to be cellular. A Wi-Fi/AP link
+        // here is the hairpin, and opening the socket would send the request
+        // back to the laptop that made it. Fail closed, with one clear line.
+        String refusal = EgressPolicy.refusal(
+                link(network, manager.getNetworkCapabilities(network)));
+        if (refusal != null) {
+            refuse(network, refusal);
+            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
+                    "refusing " + what + ": " + refusal);
+        }
+        return network;
     }
 
     /** The policy's answer for one network the platform just described. */

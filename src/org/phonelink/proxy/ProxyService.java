@@ -300,6 +300,7 @@ public final class ProxyService extends Service implements Port.Host {
             writer.println("  using       " + config.summary());
             writer.println("  max_connections " + config.maxConnections);
         }
+        writer.println("  udp         UDP ASSOCIATE supported; BIND refused");
         // Not the phone's default route: a request that fails here has to be
         // told apart from one the phone's Wi-Fi could have carried.
         Egress leaving = egress;

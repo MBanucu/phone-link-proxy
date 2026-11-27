@@ -232,7 +232,10 @@ first and takes the app's saved proxies with it.
   connections, the count returning to the live flows, a half-closed relay
   released after its linger, saturation refused instead of queued, a refused
   command, an unknown address type, an upstream failure reply, client counting,
-  a non-SOCKS greeting; the
+  a non-SOCKS greeting; UDP ASSOCIATE's request/reply framing for IPv4, IPv6
+  and domain names, a real UDP echo through an association, fragments and
+  oversized datagrams dropped without ending it, and the association ending
+  with its control connection, its idle timeout and a listener stop; the
   configuration rules (port range, the connection ceiling's bounds and its
   profile round-trip, credentials, anonymous, SSID, byte limits);
   the cellular egress selection (a validated Wi-Fi default never wins over
@@ -890,8 +893,15 @@ offline it says the check is unknown instead of guessing).
 - The laptop repository's `phone-proxy-*` scripts that still talk to the old
   app's screen and its `Start 5G Proxy` / `Stop Proxy Service` buttons are its
   own to retire; this app's adb contract is the replacement.
-- No `dial` language: it accepts `CONNECT` only. `BIND` and `UDP ASSOCIATE` are
-  answered with `command not supported`.
+- `BIND` is refused, and there is no other `dial` language beyond SOCKS5.
+  `CONNECT` and `UDP ASSOCIATE` are implemented, so TCP and UDP (QUIC
+  included) can leave through the tunnel; a client that only speaks `CONNECT`
+  still cannot send UDP through it. UDP is relayed only for a client that uses
+  the SOCKS5 UDP path: `UDP ASSOCIATE` plus the SOCKS5 UDP datagram header
+  (`RSV RSV FRAG ATYP DST.ADDR DST.PORT DATA`). Each association is pinned to
+  the first datagram's source address and port, uses the same cellular egress
+  as `CONNECT`, drops fragments and malformed datagrams, and is bounded in
+  datagram size and queue depth.
 
 ## Licence
 
