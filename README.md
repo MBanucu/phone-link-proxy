@@ -49,6 +49,12 @@ silhouette is what the system wants.
   the host that asked for it. `Egress` holds an active `TRANSPORT_CELLULAR`
   `NetworkRequest` and resolves and connects on it —
   the laptop repository's `docs/phone-network.md`, section "How the proxy gets out over cellular".
+  `EgressPolicy` makes that choice explicit and testable without Android: a
+  validated Wi-Fi default never wins over a cellular link. If the network the
+  egress resolved is ever not cellular, `Egress.connect` refuses the request with
+  one log line instead of opening a socket that would loop. `dumpsys` prints the
+  result as `egress cellular network N on <iface>`, so a live check can assert
+  where the tunnel leaves the phone.
 - **It listens on `0.0.0.0`**, so the port is the same on `ap0`, `rndis0` and
   `wlan0` and survives the address changing. That is trap 5 fixed rather than
   worked around.
@@ -210,8 +216,9 @@ uninstalls first and takes the app's saved proxies with it.
 ## Tests
 
 - `tests/proxy-app.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
-  `Closeables`, `ProxyConfig`, `ProxyState`, `ProxyRuntime` and `Socks5Server`
-  **without** `android.jar` and runs the protocol and configuration cases:
+  `Closeables`, `EgressPolicy`, `EgressState`, `ProxyConfig`, `ProxyState`,
+  `ProxyRuntime` and `Socks5Server` **without** `android.jar` and runs the
+  protocol and configuration cases:
   method negotiation, both credential failures, unauthenticated mode, CONNECT
   for IPv4 and for a domain name, relaying 32 KiB, half-close, 60 concurrent
   connections, the count returning to the live flows, a half-closed relay
@@ -220,6 +227,9 @@ uninstalls first and takes the app's saved proxies with it.
   a non-SOCKS greeting; the
   configuration rules (port range, the connection ceiling's bounds and its
   profile round-trip, credentials, anonymous, SSID, byte limits);
+  the cellular egress selection (a validated Wi-Fi default never wins over
+  cellular, and a non-cellular resolution is refused), its retry state and its
+  dump line;
   the status text the panel, the tile and the notification share; the runtime
   listener; and the `running` flag the tile turns into its subtitle. This is
   why the code has a `Logger` seam, an `Upstream` interface and a config/state

@@ -19,6 +19,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.util.Collections;
 
 /**
  * Opens upstream sockets on the cellular network.
@@ -57,6 +58,11 @@ final class Egress implements Upstream, Closeable {
     private final Object lock = new Object();
 
     private Network cellular;
+    /**
+     * Whether the guard has already printed its one line for the current
+     * non-cellular resolution. A cellular link arriving again clears it.
+     */
+    private boolean guardWarned;
 
     /** Request again after the backoff; a close or an available network cancels it. */
     private final Runnable retry = new Runnable() {
@@ -74,9 +80,18 @@ final class Egress implements Upstream, Closeable {
             new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onAvailable(Network network) {
-                    boolean carriesInternet = usable(manager.getNetworkCapabilities(network));
+                    NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
+                    EgressPolicy.Route route = route(network, capabilities);
+                    if (capabilities != null && !route.allowed()) {
+                        // The request is for cellular, so this is already wrong.
+                        // Do not cache it: a socket on it would loop.
+                        refuse(network, route.reason);
+                        return;
+                    }
+                    boolean carriesInternet = usable(capabilities);
                     synchronized (lock) {
                         cellular = network;
+                        guardWarned = false;
                         if (carriesInternet) {
                             state.available();
                         } else {
@@ -104,9 +119,24 @@ final class Egress implements Upstream, Closeable {
                 @Override
                 public void onCapabilitiesChanged(
                         Network network, NetworkCapabilities capabilities) {
+                    EgressPolicy.Route route = route(network, capabilities);
+                    if (!route.allowed()) {
+                        boolean current;
+                        synchronized (lock) {
+                            current = network.equals(cellular);
+                        }
+                        if (current) {
+                            // It was resolved for this request but is not
+                            // cellular: refuse it rather than open a socket that
+                            // would come back down the laptop's link.
+                            refuse(network, route.reason);
+                        }
+                        return;
+                    }
                     if (usable(capabilities)) {
                         synchronized (lock) {
                             if (network.equals(cellular)) {
+                                guardWarned = false;
                                 state.available();
                             }
                         }
@@ -165,10 +195,8 @@ final class Egress implements Upstream, Closeable {
         }
         String label = null;
         if (network != null) {
-            LinkProperties properties = manager.getLinkProperties(network);
-            String iface = properties == null ? null : properties.getInterfaceName();
-            label = (iface == null ? "cellular" : iface)
-                    + " (cellular, network " + network + ")";
+            label = EgressPolicy.describe(
+                    link(network, manager.getNetworkCapabilities(network)));
         }
         synchronized (lock) {
             return state.describe(label, SystemClock.elapsedRealtime());
@@ -219,6 +247,17 @@ final class Egress implements Upstream, Closeable {
                     "no usable cellular egress for " + host + ":" + port + ": " + reason);
         }
 
+        // The guard: whatever was resolved has to be cellular. A Wi-Fi/AP link
+        // here is the hairpin, and opening the socket would send the request
+        // back to the laptop that made it. Fail closed, with one clear line.
+        String refusal = EgressPolicy.refusal(
+                link(network, manager.getNetworkCapabilities(network)));
+        if (refusal != null) {
+            refuse(network, refusal);
+            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
+                    "refusing " + host + ":" + port + ": " + refusal);
+        }
+
         long deadline = SystemClock.elapsedRealtime() + timeoutMs;
         InetAddress[] addresses;
         try {
@@ -251,6 +290,60 @@ final class Egress implements Upstream, Closeable {
         }
         throw new Upstream.Failure(replyFor(last),
                 "cannot reach " + host + ":" + port + " over cellular: " + last);
+    }
+
+    /** The policy's answer for one network the platform just described. */
+    private EgressPolicy.Route route(Network network, NetworkCapabilities capabilities) {
+        return EgressPolicy.select(Collections.singletonList(link(network, capabilities)));
+    }
+
+    /**
+     * Drop a link that must not carry the tunnel, ask for another one, and
+     * print the guard's one line. The line repeats only after a cellular link
+     * has been accepted again, so a client retrying cannot flood the log.
+     */
+    private void refuse(Network network, String reason) {
+        boolean warn;
+        synchronized (lock) {
+            warn = !guardWarned;
+            guardWarned = true;
+            if (network != null && (cellular == null || network.equals(cellular))) {
+                cellular = null;
+                scheduleLocked(state.capabilityLost(SystemClock.elapsedRealtime()));
+                lock.notifyAll();
+            }
+        }
+        if (warn) {
+            Log.e(TAG, "refusing upstream egress: " + reason);
+        }
+    }
+
+    /** One {@code Network} as the Android-free policy sees it. */
+    private EgressPolicy.Link link(Network network, NetworkCapabilities capabilities) {
+        LinkProperties properties = manager.getLinkProperties(network);
+        String iface = properties == null ? null : properties.getInterfaceName();
+        boolean cellular = capabilities != null
+                && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
+        boolean wifi = capabilities != null
+                && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        boolean internet = capabilities != null
+                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        boolean validated = capabilities != null
+                && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        boolean isDefault = network.equals(manager.getActiveNetwork());
+        return new EgressPolicy.Link(
+                networkId(network), iface, cellular, wifi, internet, validated, isDefault);
+    }
+
+    /** {@code Network(100)} as {@code 100}, which is what the dump should say. */
+    private static String networkId(Network network) {
+        String text = String.valueOf(network);
+        int open = text.indexOf('(');
+        int close = text.lastIndexOf(')');
+        if (open >= 0 && close > open) {
+            return text.substring(open + 1, close);
+        }
+        return text;
     }
 
     /**

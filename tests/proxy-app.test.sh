@@ -26,6 +26,7 @@ done
 sources=(
   "$ROOT/src/org/phonelink/proxy/Upstream.java"
   "$ROOT/src/org/phonelink/proxy/Closeables.java"
+  "$ROOT/src/org/phonelink/proxy/EgressPolicy.java"
   "$ROOT/src/org/phonelink/proxy/EgressState.java"
   "$ROOT/src/org/phonelink/proxy/EventLog.java"
   "$ROOT/src/org/phonelink/proxy/Help.java"
