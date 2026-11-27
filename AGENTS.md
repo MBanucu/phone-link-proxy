@@ -25,9 +25,10 @@ Notes for whoever — person or agent — is changing this checkout.
 - **Conventional Commits**, one change per commit: `feat(scope): …`,
   `fix(scope): …`, `test(live): …`, `docs: …`, `chore(release): …`. The footer
   is `Co-Authored-By: Codebuff <noreply@codebuff.com>` and nothing else.
-- **No secrets in the repository.** `debug.keystore` is a throwaway and is
-  never what a release is signed with; the release key comes from the
-  `ANDROID_*` secrets in the workflow, or from `PHONE_APP_KEYSTORE` locally.
+- **No secrets in the repository.** A dev key is generated per checkout at
+  `build/dev.keystore` (ignored) and is never what a release is signed with;
+  `./build.sh --release` requires `PHONE_APP_KEYSTORE`, and the release
+  workflow signs with the `ANDROID_*` secrets.
 - **Never edit `tests/live/proxy-app.sh` while a run is executing.** It is read
   as it runs; a half-written file is a run that fails somewhere unrelated.
 - **The phone is not a fixture.** It is somebody's daily uplink: the test build

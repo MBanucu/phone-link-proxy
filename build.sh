@@ -26,6 +26,24 @@ build="$here/build"
 # its own instead of sharing a private key through the repository.
 dev_keystore="$build/dev.keystore"
 
+# A publishable build passes --release. It refuses to fall back to the dev key:
+# an APK meant for other people is only ever signed with PHONE_APP_KEYSTORE.
+release=0
+if [ "$#" -gt 1 ]; then
+    echo "usage: build.sh [--release]" >&2
+    exit 2
+fi
+if [ "$#" -eq 1 ]; then
+    case $1 in
+        --release) release=1 ;;
+        *)
+            echo "build.sh: unknown argument: $1" >&2
+            echo "usage: build.sh [--release]" >&2
+            exit 2
+            ;;
+    esac
+fi
+
 sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 if [ -z "$sdk" ]; then
     echo "build.sh: ANDROID_SDK_ROOT is not set; run inside 'nix develop .#android'" >&2
@@ -65,11 +83,13 @@ echo "platform:    $android_jar"
 mkdir -p "$build"
 find "$build" -mindepth 1 -maxdepth 1 ! -name dev.keystore -exec rm -rf {} +
 
-# Signing. Two keys, one code path: a dev key generated on first use under
-# build/, so no private key is tracked in the repository; and, when one is
-# named in the environment, a release key, which is what an APK meant for other
-# people is signed with. The dev key's password is `android` because it is a
-# throwaway — a release is never signed with it.
+# Signing. Two keys, one code path. Without --release, a dev key is generated
+# on first use under build/, so no private key is tracked in the repository;
+# the dev key is a throwaway and its password is public. With --release, or
+# whenever PHONE_APP_KEYSTORE is named, the build is signed with that key
+# instead. A --release build never generates or falls back to the dev key: a
+# mistyped environment must fail the build, not publish something signed by a
+# throwaway.
 #
 #   PHONE_APP_KEYSTORE       the keystore file (JKS or PKCS12)
 #   PHONE_APP_KEY_ALIAS      the key inside it
@@ -78,10 +98,6 @@ find "$build" -mindepth 1 -maxdepth 1 ! -name dev.keystore -exec rm -rf {} +
 #
 # The passwords reach apksigner as `env:` references, so neither appears in a
 # process listing or in the log of the job that built the release.
-keystore=$dev_keystore
-key_alias=androiddebugkey
-ks_pass=pass:android
-key_pass=pass:android
 if [ -n "${PHONE_APP_KEYSTORE:-}" ]; then
     keystore=$PHONE_APP_KEYSTORE
     key_alias=${PHONE_APP_KEY_ALIAS:-}
@@ -99,12 +115,21 @@ if [ -n "${PHONE_APP_KEYSTORE:-}" ]; then
         echo "build.sh: PHONE_APP_KEYSTORE_PASS is required with PHONE_APP_KEYSTORE" >&2
         exit 2
     fi
+elif [ "$release" = 1 ]; then
+    echo "build.sh: --release requires PHONE_APP_KEYSTORE, PHONE_APP_KEY_ALIAS" >&2
+    echo "          and PHONE_APP_KEYSTORE_PASS; refusing to use the dev key" >&2
+    exit 2
+else
+    keystore=$dev_keystore
+    key_alias=androiddebugkey
+    ks_pass=pass:android
+    key_pass=pass:android
 fi
 
 # The dev key is a throwaway, which is why its password is public; it is
 # generated on first use in a checkout, mode 600, and never when a release key
 # is what will sign the build.
-if [ -z "${PHONE_APP_KEYSTORE:-}" ] && [ ! -f "$dev_keystore" ]; then
+if [ "$release" = 0 ] && [ -z "${PHONE_APP_KEYSTORE:-}" ] && [ ! -f "$dev_keystore" ]; then
     echo "generating a dev key at $dev_keystore (password: android)"
     (umask 077 &&
         keytool -genkeypair \

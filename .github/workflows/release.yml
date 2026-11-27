@@ -7,9 +7,8 @@ name: Release
 # `ANDROID_KEYSTORE` (the keystore, base64 so it can be a text secret),
 # `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_ALIAS` and, if the key's password
 # differs from the store's, `ANDROID_KEY_PASS`. `ANDROID_CERT_SHA256` is
-# optional: set it to the release key's SHA-256 fingerprint and the built APK
-# must carry it; unset, the job warns and publishes with the debug-key check
-# alone.
+# required: it is the release certificate's SHA-256 fingerprint, and a
+# publishable build fails closed rather than publish an unpinned certificate.
 on:
   push:
     tags: ["v*"]
@@ -18,8 +17,14 @@ permissions:
   contents: write
 
 jobs:
-  apk:
+  # The tag check and the same checks CI runs on a branch, before anything is
+  # built: unit, harness, format, icon, changelog and the APK compile are all
+  # `nix flake check`, so a broken test cannot tag-publish and a mismatched tag
+  # fails before the release build starts.
+  checks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # The Android SDK comes from the flake, and a cold cache pays for it.
     timeout-minutes: 45
     steps:
@@ -49,12 +54,20 @@ jobs:
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # A tag must not publish code that a branch would have failed: the unit
-      # tests, the formatter, the changelog and the icon are all flake checks.
-      # This also compiles the APK once; the release build repeats it with the
-      # release key afterwards.
       - name: Run the flake checks
         run: nix flake check --print-build-logs
+
+  apk:
+    needs: checks
+    runs-on: ubuntu-latest
+    # The Android SDK comes from the flake, and a cold cache pays for it.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v32
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       # The keystore is a binary, and a secret is text: it travels base64-encoded
       # and is written to $RUNNER_TEMP, which the runner discards with the job.
@@ -85,17 +98,24 @@ jobs:
             echo "PHONE_APP_KEY_ALIAS=$KEY_ALIAS"
           } >> "$GITHUB_ENV"
 
-      # The listing's icon is a rendering of artwork/launcher-icon.svg. A tag
-      # cut on a tree where the SVG moved and icon.png did not would publish a
-      # store picture a version behind, so this stays a named step in front of
-      # the release build as well as being part of the flake checks.
-      - name: Check the icon is the drawing
-        run: nix build .#checks.x86_64-linux.icon --no-link
+      # A fingerprint is not key material, but a publishable build must pin it:
+      # without the expected digest a mistyped key secret could sign with
+      # another key that installs nothing over the previous release. Fail
+      # before the build rather than warn after it.
+      - name: Require the release certificate fingerprint
+        env:
+          CERT: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          set -eu
+          if [ -z "${CERT:-}" ]; then
+            echo "::error::ANDROID_CERT_SHA256 is not set; refusing to publish an unpinned certificate" >&2
+            exit 1
+          fi
 
-      # build.sh signs with whatever PHONE_APP_KEYSTORE names, so this is the
-      # same script a local release build runs — and the certificate is read back
-      # afterwards, because a build that quietly used the debug key would
-      # otherwise look exactly like one that did not.
+      # build.sh --release signs with whatever PHONE_APP_KEYSTORE names and
+      # refuses to fall back to the dev key. The certificate is read back
+      # afterwards as well, because a build that quietly used the debug key
+      # would otherwise look exactly like one that did not.
       - name: Build the APK with the release key
         env:
           PHONE_APP_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
@@ -105,7 +125,7 @@ jobs:
           set -eu
           cat > "$RUNNER_TEMP/build-release.sh" <<'SCRIPT'
           set -eu
-          ./build.sh
+          ./build.sh --release
           apksigner=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -1)
           certs=$("$apksigner" verify --print-certs build/phone-link-proxy.apk)
           printf "%s\n" "$certs"
@@ -113,27 +133,23 @@ jobs:
             echo "::error::the APK carries the debug key; refusing to publish it" >&2
             exit 1
           fi
-          # A signature that is not the debug one is not necessarily the release
-          # key: a mistyped secret would sign with another key that installs
-          # nothing over the previous release. The fingerprint is public, so it
-          # is a secret only to keep it in one place; when it is set it must match.
-          if [ -n "${ANDROID_CERT_SHA256:-}" ]; then
-            want=$(printf "%s" "$ANDROID_CERT_SHA256" | tr 'A-F' 'a-f' | tr -d ' :')
-            got=$(printf "%s\n" "$certs" |
-              sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
-              tr 'A-F' 'a-f' | tr -d ' :')
-            if [ -z "$got" ]; then
-              echo "::error::could not read the APK's SHA-256 fingerprint" >&2
-              exit 1
-            fi
-            if [ "$got" != "$want" ]; then
-              echo "::error::the APK certificate is $got, not ANDROID_CERT_SHA256 ($want)" >&2
-              exit 1
-            fi
-            echo "certificate fingerprint matches ANDROID_CERT_SHA256"
-          else
-            echo "::warning::ANDROID_CERT_SHA256 is not set; the release certificate fingerprint was not pinned"
+          if [ -z "${ANDROID_CERT_SHA256:-}" ]; then
+            echo "::error::ANDROID_CERT_SHA256 is not set; refusing to publish an unpinned certificate" >&2
+            exit 1
           fi
+          want=$(printf "%s" "$ANDROID_CERT_SHA256" | tr 'A-F' 'a-f' | tr -d ' :')
+          got=$(printf "%s\n" "$certs" |
+            sed -n 's/^Signer #1 certificate SHA-256 digest: //p' |
+            tr 'A-F' 'a-f' | tr -d ' :')
+          if [ -z "$got" ]; then
+            echo "::error::could not read the APK's SHA-256 fingerprint" >&2
+            exit 1
+          fi
+          if [ "$got" != "$want" ]; then
+            echo "::error::the APK certificate is $got, not ANDROID_CERT_SHA256 ($want)" >&2
+            exit 1
+          fi
+          echo "certificate fingerprint matches ANDROID_CERT_SHA256"
           SCRIPT
           chmod +x "$RUNNER_TEMP/build-release.sh"
           nix develop --command "$RUNNER_TEMP/build-release.sh"
