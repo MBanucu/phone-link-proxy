@@ -19,6 +19,10 @@ Notes for whoever — person or agent — is changing this checkout.
   per-versionCode changelogs.
 - `version` — the one source of the version. Bump it, add
   `fastlane/metadata/android/en-US/changelogs/<code>.txt`, then tag.
+- the laptop side, `MBanucu/phone-link` — the scripts, NixOS module and doctor
+  that drive this app. The ownership split, version policy and change order are
+  stated once, there:
+  [`docs/proxy-boundary.md`](https://github.com/MBanucu/phone-link/blob/main/docs/proxy-boundary.md).
 
 ## Rules
 

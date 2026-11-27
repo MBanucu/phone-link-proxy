@@ -11,7 +11,9 @@ It began as `android/` in the laptop project that drives it over adb and now
 lives on its own: its own build, its own tests, its own releases. The adb
 contract between the two is documented by the app itself — `About this app`,
 and the service's own `dumpsys` dump — and is not expected to change with either
-side.
+side. The ownership split, version policy and change order are stated once, on
+the laptop side:
+[`docs/proxy-boundary.md`](https://github.com/MBanucu/phone-link/blob/main/docs/proxy-boundary.md).
 
 ## Store metadata
 
