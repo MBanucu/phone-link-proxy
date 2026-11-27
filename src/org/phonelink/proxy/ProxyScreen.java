@@ -73,6 +73,7 @@ final class ProxyScreen {
     private final CheckBox tile;
     private final TextView tileState;
     private final TextView battery;
+    private final TextView oemAutostart;
     private final TextView adbState;
     private final TextView pending;
     private final TextView pendingService;
@@ -133,6 +134,7 @@ final class ProxyScreen {
         tile = screen.findViewById(R.id.tile);
         tileState = screen.findViewById(R.id.tile_state);
         battery = screen.findViewById(R.id.battery);
+        oemAutostart = screen.findViewById(R.id.oem_autostart);
         adbState = screen.findViewById(R.id.adb_state);
         pending = screen.findViewById(R.id.pending);
         pendingService = screen.findViewById(R.id.pending_service);
@@ -332,6 +334,29 @@ final class ProxyScreen {
         battery.setTypeface(null, warning ? Typeface.BOLD : Typeface.NORMAL);
         battery.setClickable(!exempt);
         battery.setOnClickListener(exempt ? null : view -> actions.batteryHelp());
+    }
+
+    /**
+     * The DokeOS gate, on its own line: unknown and unreadable, or a dated
+     * suspicion. Never "clear" — the vendor list is behind a signature
+     * permission this app does not hold. The persisted fact is only "no boot
+     * broadcast"; the words here are the interpretation.
+     *
+     * @param missedAt epoch seconds of the first observation after a boot
+     *                 whose broadcast never arrived, or 0 when there is none
+     * @param noticed  that instant in the phone's locale, or null when empty
+     */
+    void renderOemAutostart(long missedAt, String noticed) {
+        boolean likelyBlocked = missedAt > 0 && noticed != null;
+        if (likelyBlocked) {
+            oemAutostart.setText(
+                    activity.getString(R.string.oem_autostart_blocked, noticed));
+        } else {
+            oemAutostart.setText(R.string.oem_autostart_unreadable);
+        }
+        oemAutostart.setTextColor(
+                likelyBlocked ? activity.getColor(R.color.warning) : batteryColor);
+        oemAutostart.setTypeface(null, likelyBlocked ? Typeface.BOLD : Typeface.NORMAL);
     }
 
     /** One of the three segments of an open proxy, and nothing else. */

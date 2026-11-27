@@ -530,9 +530,19 @@ checkbox says whether the exemption is granted, tapping it opens the system
 request, and pressing Start with auto-start on asks when it is missing. That
 line is drawn red and bold while auto-start is on and the exemption is missing,
 and as an ordinary small line once the checkbox is off — only a promise the app
-cannot keep is worth a colour. A granted exemption is not a promise of a
-restart: the DokeOS list is separate, cannot be read by the app, and a reboot
-can still be blocked with no warning in the panel.
+cannot keep is worth a colour.
+
+A second line, directly under it, is the DokeOS gate and is never reported as
+clear: the vendor list is behind
+`com.freeme.freemanager.permission.ACCESS_INTERFACE`, so neither the app nor
+adb can read it. The line says the list is unreadable and names the screen and
+the two drivers (`wireless-adb-keeper/autostart-allow.sh "Phone link proxy"`,
+`phone-link-tools/autotoggle`). When auto-start is on and no boot broadcast
+reached the app for the current boot, it says **likely blocked this boot** and
+dates the observation — a suspicion from the missing broadcast, not a read of
+the list. `stopped=true` is what a clean install shows too and is not used as
+evidence. The red header mark stays the battery gate's alone, so a granted
+exemption still does not promise a restart.
 
 The adb path has the same switch, and gate 2 can be granted without touching
 the phone:
@@ -619,8 +629,9 @@ The title bar is gone. Its only content was the app's own name, so the layout
 carries a header row of icons instead: the name of the list (or of the open
 proxy with a back arrow), a warning mark that appears while auto-start is on
 and the battery exemption is missing (tapping it opens the battery request,
-from either screen; it cannot see the DokeOS list, so a blocked boot can still
-have no mark), an `i` for the app's own Info, and the burger. The menu holds
+from either screen; it cannot see the DokeOS list, so a blocked boot has no red
+mark — the separate Auto Start Management line carries the dated suspicion
+when the app can see one), an `i` for the app's own Info, and the burger. The menu holds
 `New proxy`, `Save`, `Save as…`, `Rename`, `Delete` for the open one,
 `All events`, and `About this app` — the same Info the header's `i` opens. The open proxy carries
 a plain `Save` next to `Revert`, and `Save as…`/`Rename`/`Delete` stay in the
@@ -708,10 +719,15 @@ the same dialog on the phone. The few facts a check needs while the service is
 stopped are still readable: every change to the store rewrites
 `/sdcard/Android/data/org.phonelink.proxy/files/state.txt`, one `key value`
 line each — `auto_start`, `adb_wifi`, `wifi_lock`, `port`, `ssid`,
-`any_network`, `in_use` —
+`any_network`, `in_use`, `oem_autostart unreadable` —
 so `phone-doctor` can say what auto-start is set to and what Android's battery
-gate reports for a phone whose service is not running. It cannot see the
-DokeOS list. The file holds no credentials.
+gate reports for a phone whose service is not running. It also carries
+`last_boot no_broadcast <epoch seconds>` only when the observation is worth
+recording: no boot broadcast reached the app in the current boot and auto-start
+is on. That line states the observation and the time the app noticed, not a
+cause; the panel and `phone-doctor` turn it into the dated "likely blocked"
+wording. It cannot see the DokeOS list, and the file holds no credentials or
+guesses.
 
 Measured on the phone (Android 15): with the switch on, `settings put global
 adb_wifi_enabled 0` plus the phone re-joining `PhoneLink` ends with
@@ -887,8 +903,10 @@ offline it says the check is unknown instead of guessing).
   read or write — and the battery-optimization exemption. Missing the second,
   Android 15 refuses the foreground-service start
   (`Background started FGS: Disallowed`); missing the first, the package is
-  stopped at boot and the receiver never runs at all. The panel can check only
-  the second. Either way the listener stays off until the next explicit start
+  stopped at boot and the receiver never runs at all. The panel can check the
+  second and can only report the first as unreadable, or as a dated "likely
+  blocked this boot" when no boot broadcast arrived; it never claims the vendor
+  list is open. Either way the listener stays off until the next explicit start
   or the tile.
 - The laptop repository's `phone-proxy-*` scripts that still talk to the old
   app's screen and its `Start 5G Proxy` / `Stop Proxy Service` buttons are its

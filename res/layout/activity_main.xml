@@ -364,6 +364,18 @@
                             android:text="@string/battery_optimized"
                             android:textAppearance="?android:attr/textAppearanceSmall" />
 
+                        <!-- The vendor gate, separate from the battery line on
+                             purpose: the red mark and the line above are about
+                             the battery exemption only, and this one never says
+                             the DokeOS list is clear. -->
+                        <TextView
+                            android:id="@+id/oem_autostart"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingBottom="8dp"
+                            android:text="@string/oem_autostart_unreadable"
+                            android:textAppearance="?android:attr/textAppearanceSmall" />
+
                         <LinearLayout style="@style/FieldLabelRow">
                             <CheckBox
                                 android:id="@+id/adb_wifi"
