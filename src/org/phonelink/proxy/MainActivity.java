@@ -133,7 +133,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
 
             @Override
             public void autoStartChanged() {
-                renderBattery();
+                renderGates();
             }
 
             @Override
@@ -261,7 +261,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         profileScreen.setVisibility(View.GONE);
         homeScreen.setVisibility(View.VISIBLE);
         home.render();
-        renderBattery();
+        renderGates();
     }
 
     private void openProfile(String name) {
@@ -274,7 +274,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         back.setVisibility(View.VISIBLE);
         homeScreen.setVisibility(View.GONE);
         profileScreen.setVisibility(View.VISIBLE);
-        renderBattery();
+        renderGates();
     }
 
     // -- one proxy ------------------------------------------------------
@@ -290,7 +290,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
             return;
         }
         page.renderPending();
-        renderBattery();
+        renderGates();
     }
 
     private void saveForm() {
@@ -749,7 +749,7 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         super.onResume();
         // The exemption is granted in the system's own screen, so the answer
         // arrives with the next resume rather than with a result code.
-        renderBattery();
+        renderGates();
         page.renderAdbState();
     }
 
@@ -797,7 +797,17 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
                 : ConfigStore.profileAutoStart(this, inUse);
     }
 
-    private void renderBattery() {
+    /**
+     * Both boot gates, kept apart on purpose. The battery line and the red
+     * header mark are about the exemption only; the DokeOS line below it never
+     * claims the vendor list is open, because this app cannot read it.
+     */
+    private void renderGates() {
+        // A boot that went by without the receiver is only observable later:
+        // the panel is where the app is opened, so that is where it looks.
+        ConfigStore.observeBoot(this);
+        ConfigStore.publishState(this);
+
         boolean exempt = batteryExempt();
         // Only a promise the app cannot keep is worth a colour: with auto-start
         // off, the line is a fact about the phone rather than a warning about
@@ -805,6 +815,16 @@ public final class MainActivity extends Activity implements ProxyRuntime.Listene
         boolean warningNow = !exempt && autoStartWanted();
         page.renderBattery(exempt, warningNow);
         warning.setVisibility(warningNow ? View.VISIBLE : View.GONE);
+
+        long blockedAt = ConfigStore.bootBlockedAt(this);
+        page.renderOemAutostart(blockedAt, blockedAt > 0 ? noticedAt(blockedAt) : null);
+    }
+
+    /** The suspicion's timestamp, in the phone's locale; it is when the app noticed. */
+    private String noticedAt(long epochSeconds) {
+        java.text.DateFormat format = java.text.DateFormat.getDateTimeInstance(
+                java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT);
+        return format.format(new java.util.Date(epochSeconds * 1000));
     }
 
     private void askForExemption() {

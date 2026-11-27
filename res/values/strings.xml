@@ -108,6 +108,10 @@
     <string name="battery_message">A restart after a reboot needs two gates: this app exempt from battery optimization, and enabled in DokeOS Auto Start Management (System Manager → App Management → Auto Start Management). This asks for the battery one. Without both, the tile still works, but the proxy does not come back after a reboot.</string>
     <string name="battery_open">Open settings</string>
     <string name="battery_later">Not now</string>
+    <!-- The DokeOS gate is separate from the battery line above, and is never
+         reported as clear: the vendor list cannot be read from the app. -->
+    <string name="oem_autostart_unreadable">Auto Start Management: unreadable — the DokeOS list is protected by com.freeme.freemanager.permission.ACCESS_INTERFACE, so the app cannot read it. Check System Manager → App Management → Auto Start Management, or run wireless-adb-keeper/autostart-allow.sh \"Phone link proxy\" / phone-link-tools/autotoggle.</string>
+    <string name="oem_autostart_blocked">Auto Start Management: likely blocked this boot (noticed %1$s) — no boot broadcast reached the app. Enable \"Phone link proxy\" in System Manager → App Management → Auto Start Management, or run wireless-adb-keeper/autostart-allow.sh \"Phone link proxy\" / phone-link-tools/autotoggle. This is a suspicion; the vendor list cannot be read.</string>
 
     <!-- What each mark explains, in the order the controls appear. -->
     <string name="info_port_title">Port</string>

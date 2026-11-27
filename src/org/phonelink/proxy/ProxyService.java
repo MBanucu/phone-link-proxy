@@ -90,7 +90,9 @@ public final class ProxyService extends Service implements Port.Host {
         ports = new Ports(this);
         // The few facts the doctor reads when this service is not running: a
         // stopped app prints nothing for `dumpsys activity service`, which is
-        // the state it is in when a phone is broken.
+        // the state it is in when a phone is broken. Observe the boot first so
+        // the state file carries the boot gate facts of this run.
+        ConfigStore.observeBoot(this);
         ConfigStore.publishState(this);
         notifications = getSystemService(NotificationManager.class);
         PowerManager power = getSystemService(PowerManager.class);
@@ -307,6 +309,10 @@ public final class ProxyService extends Service implements Port.Host {
         writer.println("  egress      "
                 + (leaving == null ? "none (no listener started)" : leaving.describe()));
         writer.println("  auto-start  " + ConfigStore.autoStart(this));
+        // Never "clear": the vendor list is behind a signature permission, so
+        // the only honest answer from a running service is that it is unknown.
+        writer.println("  oem_autostart " + BootGate.UNREADABLE
+                + " (DokeOS list is signature-protected)");
         writer.println("  adb_wifi    " + ConfigStore.adbWireless(this)
                 + " (Android's switch is " + (AdbWireless.on(this) ? "on" : "off") + ")");
         writer.println("  wifi_lock   " + (wifiLock != null && wifiLock.isHeld()

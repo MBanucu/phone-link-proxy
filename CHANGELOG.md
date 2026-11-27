@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The panel reports the DokeOS Auto Start Management gate on its own line,
+  separate from the battery line and the red header mark. The vendor list is
+  behind `com.freeme.freemanager.permission.ACCESS_INTERFACE` and cannot be
+  read, so the line says unreadable and names the screen and the two drivers;
+  it never says clear. When auto-start is on and no boot broadcast reached the
+  app in the current boot, it says "likely blocked this boot" with the time the
+  app noticed. `state.txt` carries the same facts for `phone-doctor`
+  (`oem_autostart unreadable`, and `last_boot blocked <epoch>` only when
+  earned); `stopped=true` alone is not used as evidence (#5).
+
 ### Fixed
 
 - The cellular egress is now selected and guarded explicitly (`EgressPolicy`).

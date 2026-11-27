@@ -23,6 +23,9 @@ if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
 && !Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
 return;
 }
+        // Before the auto-start check: that this broadcast arrived is the fact
+        // the DokeOS gate is judged by, whether or not a listener should start.
+        ConfigStore.noteBoot(context);
         if (!ConfigStore.autoStart(context)) {
             return;
         }

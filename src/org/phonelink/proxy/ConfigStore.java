@@ -3,6 +3,7 @@ package org.phonelink.proxy;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.provider.Settings;
 import android.util.Log;
 
 import java.io.File;
@@ -64,6 +65,11 @@ final class ConfigStore {
     private static final String KEY_TILE_CYCLE = "tile_cycle";
     static final String KEY_SELECTED_PROFILE = "selected_profile";
     static final String KEY_IN_USE = "in_use";
+    // The boot count the receiver last saw, and the first time the app noticed
+    // that a boot went by without one. Both are facts about this install, not
+    // claims about the DokeOS list, which cannot be read at all.
+    private static final String KEY_BOOT_SEEN = "boot_seen";
+    private static final String KEY_BOOT_BLOCKED_AT = "boot_blocked_at";
 
     // Package-private for the same reason as KEY_AUTO_START: the panel shows a
     // configuration the moment adb saves one.
@@ -114,6 +120,82 @@ final class ConfigStore {
         publishState(context);
     }
 
+    /** Android's own count of boots, or -1 when this build will not say. */
+    static long bootCount(Context context) {
+        try {
+            return Settings.Global.getLong(
+                    context.getContentResolver(), Settings.Global.BOOT_COUNT, -1);
+        } catch (RuntimeException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * A boot broadcast reached the app: the vendor gate opened for this boot.
+     *
+     * <p>Called before the auto-start check on purpose. Whether the listener
+     * should start is a separate question; that the receiver ran is the fact
+     * this marker exists for.
+     */
+    static void noteBoot(Context context) {
+        long count = bootCount(context);
+        SharedPreferences.Editor edit = prefs(context).edit().remove(KEY_BOOT_BLOCKED_AT);
+        if (count >= 0) {
+            edit.putLong(KEY_BOOT_SEEN, count);
+        }
+        edit.apply();
+        publishState(context);
+    }
+
+    /**
+     * Look at the boot count and keep a dated suspicion only when one is
+     * earned: the receiver has not run in this boot and auto-start is on.
+     *
+     * <p>The first look at a fresh install is a baseline, not a block — a phone
+     * that was never booted with this app has no marker to be missing. The
+     * evidence is deliberately only "no receiver this boot": {@code
+     * stopped=true} is what a clean install shows too, so it is not used.
+     */
+    static void observeBoot(Context context) {
+        long count = bootCount(context);
+        if (count < 0) {
+            return;
+        }
+        SharedPreferences prefs = prefs(context);
+        if (!prefs.contains(KEY_BOOT_SEEN)) {
+            prefs.edit().putLong(KEY_BOOT_SEEN, count).apply();
+            return;
+        }
+        long seen = prefs.getLong(KEY_BOOT_SEEN, -1);
+        long blockedAt = prefs.getLong(KEY_BOOT_BLOCKED_AT, 0);
+        long now = System.currentTimeMillis() / 1000;
+        if (!BootGate.missedThisBoot(count, seen)) {
+            if (blockedAt != 0) {
+                prefs.edit().remove(KEY_BOOT_BLOCKED_AT).apply();
+            }
+            return;
+        }
+        if (!autoStart(context)) {
+            // No promise was made for this boot, and turning auto-start on now
+            // must not blame the boot that happened while it was off. Consume
+            // the gap so a later look does not manufacture a suspicion.
+            prefs.edit()
+                    .putLong(KEY_BOOT_SEEN, count)
+                    .remove(KEY_BOOT_BLOCKED_AT)
+                    .apply();
+            return;
+        }
+        long blocked = BootGate.observedBlockedAt(count, seen, true, blockedAt, now);
+        if (blocked != blockedAt) {
+            prefs.edit().putLong(KEY_BOOT_BLOCKED_AT, blocked).apply();
+        }
+    }
+
+    /** When this install first noticed a boot the receiver did not run in, or 0. */
+    static long bootBlockedAt(Context context) {
+        return prefs(context).getLong(KEY_BOOT_BLOCKED_AT, 0);
+    }
+
     /**
      * Whether a listener should ask Android to keep the Wi-Fi association while
      * it runs. Off by default: the lock costs battery, and the phone may leave
@@ -152,6 +234,10 @@ final class ConfigStore {
         text.append("ssid ").append(config.ssid).append('\n');
         text.append("any_network ").append(config.anyNetwork).append('\n');
         text.append("in_use ").append(inUse == null ? "" : inUse).append('\n');
+        // The vendor gate is never reported as open. The dated suspicion is
+        // written only when the receiver has not run in this boot and
+        // auto-start is on; see BootGate for why it says "blocked" only there.
+        text.append(BootGate.stateText(bootBlockedAt(context))).append('\n');
         File dir;
         try {
             dir = context.getExternalFilesDir(null);

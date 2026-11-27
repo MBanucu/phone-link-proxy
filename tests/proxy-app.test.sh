@@ -25,6 +25,7 @@ done
 
 sources=(
   "$ROOT/src/org/phonelink/proxy/Upstream.java"
+  "$ROOT/src/org/phonelink/proxy/BootGate.java"
   "$ROOT/src/org/phonelink/proxy/Closeables.java"
   "$ROOT/src/org/phonelink/proxy/EgressPolicy.java"
   "$ROOT/src/org/phonelink/proxy/EgressState.java"
@@ -66,4 +67,37 @@ part_timing javac "$started" "$compiled"
 "$JAVA" -cp "$TMP/classes" org.phonelink.proxy.ProxyAppTest
 status=$?
 part_timing cases "$compiled" "$(date +%s%N)"
-exit $status
+
+# The panel is Android code and not part of the JVM suite, but the two lines
+# and the words that keep them apart are files: a missing one is a red mark
+# that silently means two gates again.
+ui=0
+ui_assert() { # ui_assert FILE PATTERN WHAT
+  if ! grep -q -- "$2" "$1"; then
+    printf 'FAIL %s\n' "$3"
+    ui=1
+  fi
+}
+strings=$ROOT/res/values/strings.xml
+layout=$ROOT/res/layout/activity_main.xml
+ui_assert "$strings" 'name="oem_autostart_unreadable"' \
+  "no separate unreadable OEM autostart line"
+ui_assert "$strings" 'name="oem_autostart_blocked"' \
+  "no likely-blocked OEM autostart line"
+ui_assert "$strings" 'com.freeme.freemanager.permission.ACCESS_INTERFACE' \
+  "the OEM line does not name the protected list's permission"
+ui_assert "$strings" 'wireless-adb-keeper/autostart-allow.sh' \
+  "the OEM line does not name the adb driver"
+ui_assert "$strings" 'phone-link-tools/autotoggle' \
+  "the OEM line does not name the accessibility driver"
+ui_assert "$strings" 'the DokeOS Auto Start Management list is separate' \
+  "the battery line no longer says it is only the battery gate"
+ui_assert "$strings" 'The battery gate blocks the restart after a reboot' \
+  "the header mark no longer says it is the battery gate"
+ui_assert "$layout" 'android:id="@+id/oem_autostart"' \
+  "the panel layout has no OEM autostart line"
+[ -n "$status" ] || status=1
+if [ "$status" -ne 0 ]; then
+  exit "$status"
+fi
+exit "$ui"

@@ -864,6 +864,19 @@ public final class ProxyAppTest {
             // that reaches it from adb has to be in it.
             assertTrue(text.contains(Help.adbDump("org.phonelink.proxy")),
                     "help does not say how to print it");
+            // The gate the app cannot read has to be named as unreadable, with
+            // the permission that protects it and the two drivers that can
+            // still reach the screen.
+            assertTrue(text.contains("com.freeme.freemanager.permission.ACCESS_INTERFACE"),
+                    "help does not name the vendor permission");
+            assertTrue(text.contains("wireless-adb-keeper/autostart-allow.sh"),
+                    "help does not name the adb driver");
+            assertTrue(text.contains("phone-link-tools/autotoggle"),
+                    "help does not name the accessibility driver");
+            assertTrue(text.contains("likely blocked this boot"),
+                    "help does not describe the dated suspicion");
+            assertTrue(text.contains("never as clear"),
+                    "help does not say the vendor gate is never clear");
         });
 
         test("the help text names the package the app is installed as", () -> {
@@ -949,6 +962,35 @@ public final class ProxyAppTest {
                     "the tag is not sticky");
             EventLog.clear();
             assertEqual(0, EventLog.forProfile(null).size(), "clear empties every view");
+        });
+
+        // --- the two boot gates --------------------------------------------
+
+        test("the OEM gate is unreadable even when the battery gate is clear", () -> {
+            // BootGate has no battery input on purpose: a granted exemption
+            // cannot turn the vendor list into a readable fact, so the state
+            // file says unreadable and writes no ok for it.
+            assertEqual("oem_autostart unreadable", BootGate.stateText(0),
+                    "the vendor gate is not reported as clear");
+            assertFalse(BootGate.stateText(0).contains("last_boot"),
+                    "a clean install has no blocked-boot claim");
+        });
+
+        test("a missed boot is a dated suspicion only with auto-start on", () -> {
+            long seen = 41;
+            assertTrue(BootGate.missedThisBoot(42, seen), "a newer boot was missed");
+            assertFalse(BootGate.missedThisBoot(seen, seen), "the receiver saw this boot");
+            assertFalse(BootGate.missedThisBoot(42, -1), "a clean install has no marker");
+            assertEqual(0, (int) BootGate.observedBlockedAt(42, seen, false, 0, 1_000),
+                    "auto-start off is not a blocked restart");
+            assertEqual(1_000, (int) BootGate.observedBlockedAt(42, seen, true, 0, 1_000),
+                    "the first look dates the suspicion");
+            assertEqual(1_000, (int) BootGate.observedBlockedAt(43, seen, true, 1_000, 2_000),
+                    "a later look keeps the first date");
+            assertEqual(0, (int) BootGate.observedBlockedAt(41, seen, true, 1_000, 2_000),
+                    "the receiver running clears it");
+            assertTrue(BootGate.stateText(1_000).contains("last_boot blocked 1000"),
+                    "the dated suspicion is machine-readable");
         });
 
         // --- state text ----------------------------------------------------
