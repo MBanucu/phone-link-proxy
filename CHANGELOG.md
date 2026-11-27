@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no boot broadcast reached the app this boot with auto-start on. The "likely
   blocked" wording lives in the panel and `phone-doctor`; `stopped=true` alone
   is not used as evidence (#5).
+- Saved proxies can leave and come back over adb, without a file on the phone
+  and without a password on an `am` command line: `EXPORT` and `IMPORT` open a
+  one-shot loopback socket, take one connection for at most 60 seconds, compare
+  a one-time token in constant time, and only run while the screen is unlocked.
+  The body is the same `ProfileDocument` JSON the menu writes, validated whole
+  (ports, names, credentials, 1 MiB / 256 entries) before an import writes
+  anything. This is what lets `phone-proxy-install --replace-signer` keep the
+  app's saved proxies (phone-link#66).
 
 ### Fixed
 

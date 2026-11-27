@@ -3,6 +3,7 @@ package org.phonelink.proxy;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.KeyguardManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -58,6 +59,17 @@ public final class ProxyService extends Service implements Port.Host {
     static final String ACTION_DELETE_PROFILE = "org.phonelink.proxy.action.DELETE_PROFILE";
     /** Give a saved configuration another name: --es profile OLD --es to NEW. */
     static final String ACTION_RENAME_PROFILE = "org.phonelink.proxy.action.RENAME_PROFILE";
+    /** Pull every saved proxy over a one-shot loopback socket, unlocked only. */
+    static final String ACTION_EXPORT = "org.phonelink.proxy.action.EXPORT";
+    /** Put a ProfileDocument back over a one-shot loopback socket, unlocked only. */
+    static final String ACTION_IMPORT = "org.phonelink.proxy.action.IMPORT";
+    /**
+     * The loopback port an export/import binds for its one connection. Not the
+     * listener's SOCKS port, which the same extra spells for a START.
+     */
+    static final String EXTRA_TRANSFER_PORT = "port";
+    /** The one-time token the laptop sends first; never a password. */
+    static final String EXTRA_TOKEN = "token";
 
     private static final int NOTIFICATION_ID = 1;
     private static final int ERROR_NOTIFICATION_ID = 2;
@@ -74,6 +86,8 @@ public final class ProxyService extends Service implements Port.Host {
     private ProxyConfig config;
     /** Whether this instance has already been asked to do something. */
     private boolean startedBefore;
+    /** One export or import at a time; the second one fails closed. */
+    private boolean transferring;
     /** Wireless debugging is a switch of the whole app, and one start is enough. */
     private boolean adbTouched;
     /**
@@ -131,6 +145,8 @@ public final class ProxyService extends Service implements Port.Host {
         boolean saving = ACTION_SAVE_PROFILE.equals(action);
         boolean deleting = ACTION_DELETE_PROFILE.equals(action);
         boolean renaming = ACTION_RENAME_PROFILE.equals(action);
+        boolean exporting = ACTION_EXPORT.equals(action);
+        boolean importing = ACTION_IMPORT.equals(action);
         // A service that was already doing something is not restarted by a
         // save or a delete, and a start that only came for one has to go away
         // again.
@@ -144,7 +160,23 @@ public final class ProxyService extends Service implements Port.Host {
                 ? "stopping"
                 : saving ? "saving"
                 : deleting ? "deleting"
-                : renaming ? "renaming" : "starting");
+                : renaming ? "renaming"
+                : exporting ? "exporting"
+                : importing ? "importing" : "starting");
+        if (exporting || importing) {
+            transfer(exporting, intent, startId);
+            return START_NOT_STICKY;
+        }
+        if (action != null && !ACTION_START.equals(action)) {
+            // An action this build does not know must not fall through to a
+            // start: that is how an older app answered EXPORT by starting a
+            // listener and printing nothing the laptop could use.
+            reportFailure(getString(R.string.error_unknown_action, action));
+            if (ports.isEmpty()) {
+                stopSelf();
+            }
+            return START_NOT_STICKY;
+        }
         if (stopping) {
             stopRequested(intent);
             // A stop of one listener beside others leaves a service that is
@@ -669,6 +701,79 @@ public final class ProxyService extends Service implements Port.Host {
         }
     }
 
+    // -- exporting and importing over adb --------------------------------
+
+    /**
+     * One {@code EXPORT} or {@code IMPORT}, on a worker thread: the socket waits
+     * up to a minute for the laptop, and {@link #onStartCommand} must return.
+     *
+     * <p>The gate is here, before the socket exists: a locked phone never binds,
+     * so nothing can be pulled from it by an adb session left behind. The action
+     * fails closed for bad extras and for a second transfer as well.
+     */
+    private void transfer(boolean exporting, Intent intent, int startId) {
+        int port = intent == null ? 0 : intent.getIntExtra(EXTRA_TRANSFER_PORT, 0);
+        String token = intent == null ? null : intent.getStringExtra(EXTRA_TOKEN);
+        if (!ProfileTransfer.validPort(port) || !ProfileTransfer.validToken(token)) {
+            reportFailure(getString(R.string.error_transfer_extras));
+            if (ports.isEmpty()) {
+                stopSelf();
+            }
+            return;
+        }
+        if (transferring) {
+            // Never stop the service here: the first transfer is still using it.
+            reportFailure(getString(R.string.error_transfer_busy));
+            return;
+        }
+        KeyguardManager keyguard = getSystemService(KeyguardManager.class);
+        if (keyguard == null || keyguard.isKeyguardLocked()) {
+            reportFailure(getString(R.string.error_transfer_locked));
+            if (ports.isEmpty()) {
+                stopSelf();
+            }
+            return;
+        }
+        transferring = true;
+        final int[] applied = {0};
+        Thread worker = new Thread(() -> {
+            String what = exporting ? "export" : "import";
+            try {
+                if (exporting) {
+                    ProfileTransfer.export(
+                            port, token, ProfileTransfer.DEFAULT_LIFETIME_MS,
+                            () -> ConfigStore.exportDocument(this));
+                    EventLog.add("exported every saved proxy to the laptop");
+                    Log.i(TAG, "exported every saved proxy to the laptop");
+                } else {
+                    ProfileTransfer.importDocument(
+                            port, token, ProfileTransfer.DEFAULT_LIFETIME_MS,
+                            text -> applied[0] = ConfigStore.importDocument(this, text, true));
+                    EventLog.add("imported " + applied[0]
+                            + " saved proxies from the laptop");
+                    Log.i(TAG, "imported " + applied[0] + " saved proxies from the laptop");
+                }
+            } catch (ProfileTransfer.Failure e) {
+                // The code alone: a message from the parser could quote the
+                // document, and the document holds passwords.
+                Log.w(TAG, what + " transfer refused: " + e.code);
+                EventLog.add(what + " transfer refused: " + e.code);
+            } catch (RuntimeException e) {
+                Log.e(TAG, what + " transfer failed: " + e.getClass().getSimpleName());
+                EventLog.add(what + " transfer failed");
+            } finally {
+                transferring = false;
+                if (ports.isEmpty()) {
+                    stopSelf(startId);
+                } else {
+                    publishAll();
+                }
+            }
+        }, "proxy-profile-transfer");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
     // -- the notifications ------------------------------------------------
 
     /** Share every listener's state with the panel, the shade and the Log page. */
@@ -688,10 +793,15 @@ public final class ProxyService extends Service implements Port.Host {
     }
 
     private void fail(String message) {
+        reportFailure(message);
+        stopSelf();
+    }
+
+    /** Report a refused action without stopping listeners another start owns. */
+    private void reportFailure(String message) {
         Log.e(TAG, message);
         EventLog.add("failed: " + message);
         notifyError(message);
-        stopSelf();
     }
 
     private void notifyError(String message) {

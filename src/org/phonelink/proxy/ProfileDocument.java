@@ -1,5 +1,6 @@
 package org.phonelink.proxy;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,6 +41,55 @@ final class ProfileDocument {
     /** The saved proxy the app was running, and the one the picker had selected. */
     String inUse = "";
     String selected = "";
+
+    /** The largest number of saved proxies a document may carry. */
+    static final int MAX_ENTRIES = 256;
+    /** A name is a preference key's suffix; keep it bounded and non-empty. */
+    static final int MAX_NAME_BYTES = 255;
+
+    /**
+     * Check every entry with the rules a start uses, before an import writes
+     * anything. A document with one bad entry is refused whole rather than
+     * applied until the bad one.
+     *
+     * @throws IllegalArgumentException with a message for the panel, naming the
+     *     field but never a password or an SSID's credentials
+     */
+    void validate() {
+        if (saved.size() > MAX_ENTRIES) {
+            throw new IllegalArgumentException(
+                    "the file carries " + saved.size() + " saved proxies; at most "
+                            + MAX_ENTRIES + " are read");
+        }
+        for (Entry entry : saved) {
+            if (entry.name.isEmpty()) {
+                throw new IllegalArgumentException("a saved proxy has no name");
+            }
+            if (entry.name.getBytes(StandardCharsets.UTF_8).length > MAX_NAME_BYTES) {
+                throw new IllegalArgumentException(
+                        "a saved proxy's name is longer than " + MAX_NAME_BYTES + " bytes");
+            }
+            validateConfig(entry);
+        }
+        if (active != null) {
+            validateConfig(active);
+        }
+    }
+
+    /** Normalise the entry with {@link ProxyConfig#of}, which also validates it. */
+    private static void validateConfig(Entry entry) {
+        if (entry.config == null) {
+            throw new IllegalArgumentException("a saved proxy has no configuration");
+        }
+        entry.config = ProxyConfig.of(
+                entry.config.port,
+                entry.config.user,
+                entry.config.password,
+                entry.config.ssid,
+                entry.config.anyNetwork,
+                entry.config.anonymous,
+                entry.config.maxConnections);
+    }
 
     /** The document as JSON, a field per line so a copy can be read by eye. */
     String write() {

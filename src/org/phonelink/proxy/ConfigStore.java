@@ -544,6 +544,9 @@ final class ConfigStore {
      */
     static int importDocument(Context context, String text, boolean replace) {
         ProfileDocument document = ProfileDocument.parse(text);
+        // Every entry, including the configuration in use, has to be usable
+        // before the first write: a refused import leaves the store as it was.
+        document.validate();
         List<ProfileDocument.Entry> entries = document.byName();
         if (replace) {
             for (String name : profileNames(context)) {
