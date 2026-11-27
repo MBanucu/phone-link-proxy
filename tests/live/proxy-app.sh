@@ -821,6 +821,10 @@ uplink_diag() { # uplink_diag PORT
     sed -n 's/^ *running *//p' | grep -F "port $port" | head -1)
   case $egress in
     '' | none*) iface= ;;
+    # `cellular network 100 on rmnet_data0`: the interface is after " on ",
+    # because the line now leads with what the egress is, not where it is.
+    *" on "*) iface=${egress##* on }; iface=${iface%% *} ;;
+    # An older build printed `<iface> (cellular, network N)`.
     *) iface=$(printf '%s' "$egress" | sed -n 's/^\([^ ]*\) .*/\1/p') ;;
   esac
   # The phone's own default route, which is the Wi-Fi link here.
@@ -1114,6 +1118,17 @@ step_allowed_network() {
   start_app --es ssid "$SSID" --ez any_network false
   if wait_foreground; then ok 'service is foreground'; else bad 'service is foreground'; fi
   tunnel_check 'request through the tunnel'
+  # The app's own line, not the phone's default route: the AP link is Wi-Fi, so
+  # this is the hairpin's live check. It must name a cellular network.
+  egress=$(shell dumpsys activity service "$SERVICE" 2>/dev/null |
+    sed -n 's/^ *egress \{6\}//p' | head -1)
+  case $egress in
+    "cellular network "*) ok "the app's egress is cellular ($egress)" ;;
+    *)
+      bad "the app's egress is cellular"
+      printf '  egress: %s\n' "${egress:-none in the dump}"
+      ;;
+  esac
   if curl -sS -m 10 -o /dev/null --socks5-hostname \
     "$USER_NAME:wrong@$ADDRESS:$PORT" https://example.com >/dev/null 2>&1; then
     bad 'a wrong password is refused'

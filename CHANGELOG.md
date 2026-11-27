@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The cellular egress is now selected and guarded explicitly (`EgressPolicy`).
+  With the phone's default network a validated Wi-Fi/AP and cellular available,
+  the proxy still picks the cellular link, and the JVM suite covers that
+  hairpin without a phone. If the resolved egress is ever not cellular,
+  `Egress.connect` refuses the request with one clear log line instead of
+  opening a socket that would follow the default route back into the laptop.
+  `dumpsys` prints the result as `egress cellular network N on <iface>` so a
+  live check can assert it (phone-link#45).
+
 ## [0.13.2] - 2026-11-26
 
 ### Fixed
