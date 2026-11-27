@@ -1,0 +1,4 @@
+UDP now works through the proxy: QUIC and other UDP flows no longer fail.
+The panel reports the DokeOS autostart gate separately (unknown, never
+clear), and saved proxies can be exported and restored over adb, so a
+signer change no longer loses them.

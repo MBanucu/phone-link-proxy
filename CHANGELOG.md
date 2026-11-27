@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-11-27
+
 ### Added
 
+- The listener implements SOCKS5 `UDP ASSOCIATE`, so QUIC and other UDP flows
+  no longer fail with reply code 7. One association per control connection: a
+  client-facing relay socket and a cellular-bound upstream socket, RFC 1928
+  framing (`RSV RSV FRAG ATYP DST.ADDR DST.PORT DATA`), fragments and oversized
+  datagrams dropped, a bounded queue, a 60 s idle timeout, and teardown on
+  control close or listener stop. Upstream datagrams use the same cellular
+  egress guard as CONNECT. `dumpsys` reports `udp UDP ASSOCIATE supported;
+  BIND refused` (phone-link-proxy#40).
 - The panel reports the DokeOS Auto Start Management gate on its own line,
   separate from the battery line and the red header mark. The vendor list is
   behind `com.freeme.freemanager.permission.ACCESS_INTERFACE` and cannot be
@@ -30,16 +40,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anything. This is what lets `phone-proxy-install --replace-signer` keep the
   app's saved proxies (phone-link#66).
 
+## [0.13.3] - 2026-11-27
+
+### Added
+
+- `README.md` and `AGENTS.md` link the cross-repo boundary page, giving the
+  laptop side the reciprocal link it asked for (phone-link-proxy#53).
+
 ### Fixed
 
-- The cellular egress is now selected and guarded explicitly (`EgressPolicy`).
-  With the phone's default network a validated Wi-Fi/AP and cellular available,
-  the proxy still picks the cellular link, and the JVM suite covers that
-  hairpin without a phone. If the resolved egress is ever not cellular,
-  `Egress.connect` refuses the request with one clear log line instead of
-  opening a socket that would follow the default route back into the laptop.
-  `dumpsys` prints the result as `egress cellular network N on <iface>` so a
-  live check can assert it (phone-link#45).
+- The cellular egress is selected and guarded explicitly (`EgressPolicy`).
+  With a validated Wi-Fi/AP default and cellular available, the proxy still
+  picks the cellular link, and the JVM suite covers that hairpin without a
+  phone. A resolved non-cellular egress is refused with one clear log line
+  instead of opening a socket that would follow the default route back into the
+  laptop. `dumpsys` prints `egress cellular network N on <iface>`
+  (phone-link#45).
+- `build.sh --release` requires the release key, the tag must equal
+  `v$(cat version)`, and the release workflow pins the certificate fingerprint
+  and depends on the flake checks (phone-link-proxy#19).
 
 ## [0.13.2] - 2026-11-26
 
