@@ -9,8 +9,9 @@
   second package on purpose, the way the capture service is: nothing installs it
   but a test run, and the proxy the phone actually runs carries no test code.
 
-  The signature is the repository's debug key, the same one the proxy is signed
-  with, which is what lets it instrument that app.
+  The signature is the checkout's generated dev key, the same one the proxy and
+  test builds carry in that run, which is what lets it instrument that app. A
+  release build signs all four APKs with the release key instead.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.phonelink.proxytest"

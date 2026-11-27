@@ -150,14 +150,14 @@ nix develop
 ```
 
 The SDK (build-tools 35.0.0 + platform 35) comes from this flake's dev
-shell. `debug.keystore` is tracked in the repository, so every build —
-local or in the sandbox — carries the same signature and `adb install -r`
-updates the sideloaded app instead of failing with
-`INSTALL_FAILED_UPDATE_INCOMPATIBLE`. It is a throwaway debug key: never ship
-this app with it — `build.sh` signs with a key of your own when one is named in
-the environment, see below. `build/` stays ignored. Before the key was tracked,
-each `nix build` generated its own and every install needed an uninstall, which
-also deleted the app's stored configuration.
+shell. No private key is tracked: the first `./build.sh` generates a throwaway
+dev key at `build/dev.keystore` (mode 600, password `android`) and reuses it
+on later builds in the same checkout, so `adb install -r` updates the
+sideloaded app instead of failing with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+`build/` stays ignored, and a fresh checkout or a `nix build` sandbox gets its
+own dev key, so an APK built there needs an uninstall before it can replace one
+built elsewhere. Never ship an APK signed with the dev key; a release is signed
+with a key of your own, see below.
 
 `nix flake check` builds the same APK in the sandbox (`apk`), and
 `nix build .#proxy-apk` gives the artifact without a phone. Three APKs come out:
@@ -168,20 +168,22 @@ installed by a test run and removed by it.
 
 ### Signing a release
 
-The debug key is tracked here, so anyone can sign an update with it; an APK for
-other people is signed with a key that is not:
+An APK for other people is signed with the release key. `--release` makes that
+mandatory: without `PHONE_APP_KEYSTORE` it fails instead of falling back to the
+generated dev key.
 
 ```sh
 PHONE_APP_KEYSTORE=~/keys/phone-link.jks PHONE_APP_KEY_ALIAS=phonelink \
 PHONE_APP_KEYSTORE_PASS=... PHONE_APP_KEY_PASS=... \
-  nix develop -c ./build.sh
+  nix develop -c ./build.sh --release
 ```
 
 The four variables are the keystore (JKS or PKCS12), the alias inside it and the
 two passwords, the key's being optional when it is the store's. They reach
 `apksigner` as `env:` references, so no password appears in a process listing or
-in the log of the job that ran the build. With `PHONE_APP_KEYSTORE` unset,
-nothing changes: the debug key signs and the phone updates in place.
+in the log of the job that ran the build. With `PHONE_APP_KEYSTORE` unset, a
+plain `./build.sh` still produces a locally installable APK signed with the dev
+key; that is the only thing the dev key is for.
 
 Generate a release key once and keep it somewhere it cannot be lost — the same
 key is the only way to update an installed app in place, so a lost keystore
@@ -194,11 +196,15 @@ keytool -genkeypair -keystore phone-link.jks -storetype PKCS12 \
 ```
 
 Tagging publishes an APK. `.github/workflows/release.yml` runs on a `v*` tag,
-builds from the tagged tree with the repository's release secrets
-(`ANDROID_KEYSTORE`, the keystore file base64-encoded because a secret is text,
-plus `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_ALIAS` and optionally
-`ANDROID_KEY_PASS`), reads the certificate out of the finished APK and refuses
-to publish if it is the debug one, then attaches
+fails unless the tag is exactly `v$(cat version)`, and runs the same
+`nix flake check` as CI (unit, harness, format, icon, changelog and compile)
+before building. It then builds from the tagged tree with the repository's
+release secrets (`ANDROID_KEYSTORE`, the keystore file base64-encoded because a
+secret is text, plus `ANDROID_KEYSTORE_PASS`, `ANDROID_KEY_ALIAS` and
+optionally `ANDROID_KEY_PASS`). `ANDROID_CERT_SHA256` is required: it is the
+release certificate's SHA-256 fingerprint, the finished APK must carry it, and
+the workflow refuses to publish if it is unset, if the APK carries the debug
+key, or if the certificate differs. It then attaches
 `phone-link-proxy-<version>.apk` and its `.sha256` to the release for the tag.
 The version in the name is the app's own `version` file, which is the one
 source `build.sh` stamps into the manifest.
@@ -209,9 +215,9 @@ then `phone-proxy-setup`: setup starts the proxy with the credentials from the
 root-only secrets file, turns auto-start on unless `--no-auto-start` is given,
 and verifies a request through the listener. `phone-proxy-setup --check`
 reports the settings and repeats that request without changing them. A phone
-that already runs a locally built APK cannot update in place — that
-one carries the debug key — so it needs `--replace-signer` once, which
-uninstalls first and takes the app's saved proxies with it.
+that already runs a locally built APK cannot update in place — that one carries
+a checkout's dev key — so it needs `--replace-signer` once, which uninstalls
+first and takes the app's saved proxies with it.
 
 ## Tests
 
