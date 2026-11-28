@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-28
+
+### Changed
+
+- CONNECT tunnels are carried by a fixed pool of two selector threads instead
+  of one relay thread per connection; handshakes stay in a fixed 32-thread
+  pool. 1000 idle tunnels use 35 `socks5-*` threads instead of 2001, and a live
+  200-tunnel run on the phone used 2 relay + 32 handler threads. Throughput is
+  unchanged within measurement noise (single-flow 205.6/119.7 vs
+  263.3/105.1 Mbit/s, 4-flow 90.7/72.7 vs 88.2/66.7 Mbit/s on the same cellular
+  link), 150 concurrent flows completed with identical bytes, and a mass stop
+  with 200 tunnels open left no sockets behind. SOCKS replies, counters,
+  `dumpsys`, thread names, the 10 s linger and the default ceiling are
+  unchanged (phone-link-proxy#37).
+
 ## [0.14.0] - 2026-11-28
 
 ### Added
