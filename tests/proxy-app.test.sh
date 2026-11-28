@@ -68,6 +68,7 @@ sources=(
   "$ROOT/src/org/phonelink/proxy/Handshake.java"
   "$ROOT/src/org/phonelink/proxy/Socks5Request.java"
   "$ROOT/src/org/phonelink/proxy/TcpRelay.java"
+  "$ROOT/src/org/phonelink/proxy/ChannelRelay.java"
   "$ROOT/src/org/phonelink/proxy/UdpAssociation.java"
   "$ROOT/src/org/phonelink/proxy/UdpPacket.java"
   "$ROOT/src/org/phonelink/proxy/Traffic.java"

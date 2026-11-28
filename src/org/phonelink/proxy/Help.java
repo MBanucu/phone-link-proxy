@@ -135,7 +135,7 @@ final class Help {
                 "  value, so changing only the port keeps the credentials.",
                 "    --ei port N             listener port (default 1080)",
                 "    --ei max_connections N  connections served at once (default 256,",
-                "                            16..1024; each live one costs two threads)",
+                "                            16..1024; the relay is a fixed pool)",
                 "    --es user NAME          SOCKS5 user; empty means no authentication",
                 "    --es password PASS      SOCKS5 password",
                 "    --es ssid NAME          the Wi-Fi the listener may run on",

@@ -37,9 +37,10 @@ ProxyService  ──►  Ports  ──►  Port  ──►  Socks5Server
 - **Listener** — one `Port` owns one `Uplink` gate and one `Socks5Server`; it
   binds and pauses as the phone's Wi-Fi changes.
 - **Protocol** — `Socks5Server` binds, admits and owns the sockets;
-  `Handshake` greets and parses, `TcpRelay` carries CONNECT, `UdpAssociation`
-  carries UDP ASSOCIATE, and `Socks5Request`/`UdpPacket` are the pure framing.
-  Every one of them has no Android types.
+  `Handshake` greets and parses, `TcpRelay` opens CONNECT and `ChannelRelay`
+  carries it in a fixed selector pool, `UdpAssociation` carries UDP ASSOCIATE,
+  and `Socks5Request`/`UdpPacket` are the pure framing. Every one of them has
+  no Android types.
 - **Egress** — `Egress` implements `Upstream` with a cellular
   `NetworkRequest`; `EgressPolicy` decides which link may carry a socket.
 - **Android** — connectivity callbacks, Wi-Fi information, locks, keyguard,
@@ -74,7 +75,8 @@ means the name is internal.
 | [`TransferGate.java`](../src/org/phonelink/proxy/TransferGate.java) | One export or import at a time, across threads. | `ProxyService` | no |
 | [`Socks5Server.java`](../src/org/phonelink/proxy/Socks5Server.java) | The listener: bind, accept, admission, client counts, the socket and association sets, and stop. | `Port` | no |
 | [`Handshake.java`](../src/org/phonelink/proxy/Handshake.java) | The greeting, RFC 1929 authentication, request parsing and reply framing. | one connection | no |
-| [`TcpRelay.java`](../src/org/phonelink/proxy/TcpRelay.java) | One CONNECT: open the upstream with its retry, reply, pump both directions, bounded linger. | `Socks5Server` | no |
+| [`TcpRelay.java`](../src/org/phonelink/proxy/TcpRelay.java) | One CONNECT: open the upstream with its retry, reply, then hand both channels to `ChannelRelay`. | one handler call | no |
+| [`ChannelRelay.java`](../src/org/phonelink/proxy/ChannelRelay.java) | The fixed selector pool that carries every established CONNECT: two direct buffers, half-close and the bounded linger. | `Socks5Server` | no |
 | [`UdpAssociation.java`](../src/org/phonelink/proxy/UdpAssociation.java) | One UDP ASSOCIATE: relay and cellular sockets, bounded queue, client pinning, idle timer. | `Socks5Server` | no |
 | [`Socks5Request.java`](../src/org/phonelink/proxy/Socks5Request.java) | One parsed request: its command and destination, Android-free. | one connection | no |
 | [`UdpPacket.java`](../src/org/phonelink/proxy/UdpPacket.java) | The SOCKS5 UDP request/reply header, parsed and encoded, Android-free. | none (static) | no |
@@ -178,10 +180,11 @@ Admission has three ceilings:
 
 - **Listener**: binding `0.0.0.0:port` fails if the port is taken; the port is
   removed from `Ports` and the service says so. Other ports are untouched.
-- **Connection count**: an accepted socket is tracked, then handed to a
-  `ThreadPoolExecutor` with a synchronous queue and `max_connections` handlers.
-  A client beyond the ceiling is reset at once, never queued; this bounds both
-  threads and memory whatever a LAN client asks for.
+- **Connection count**: an accepted socket is tracked and counted, then handed
+  to a fixed 32-thread handshake pool through a queue bounded by
+  `max_connections`. A client beyond the ceiling is reset at once, never
+  queued; this bounds both threads and memory whatever a LAN client asks for.
+  The handshake is short and bounded by `HANDSHAKE_TIMEOUT_MS`.
 - **Protocol**: the handshake has `HANDSHAKE_TIMEOUT_MS`; `CONNECT` gets
   `CONNECT_TIMEOUT_MS` per attempt and `CONNECT_ATTEMPTS` attempts with a fresh
   socket, because a new source port gets a new carrier NAT mapping. `BIND` is
@@ -198,16 +201,19 @@ it; a socket admitted after `close()` is reset instead of served.
 | main | Android | Service/activity callbacks, bind/pause/close, locks, publishing | process |
 | connectivity callbacks | `ConnectivityManager` on the main looper | Feed `Uplink`/`Egress`; call `evaluate` | unregistered on close |
 | `socks5-accept` | `Socks5Server.start` | Accept, track, dispatch; reset on refusal | listener close |
-| `socks5-handler` pool | `Socks5Server` | Greeting, auth, request; then `TcpRelay` serves the CONNECT, or `UdpAssociation` holds the UDP control connection | connection ends; idle core threads time out |
-| `socks5-relay` | `TcpRelay`, one per CONNECT | Upstream→client; first direction to end schedules the shared linger | both sockets closed |
-| `socks5-linger` | one per listener | Bounded close of a half-closed relay after `RELAY_LINGER_MS` | server close |
+| `socks5-handler` pool | `Socks5Server` | Greeting, auth, request, the upstream CONNECT and its reply, or the UDP control connection; a CONNECT then leaves the pool | task done; idle core threads time out |
+| `socks5-relay` pool | `ChannelRelay`, a fixed two per listener | Both directions of every established CONNECT, selected non-blocking; first clean direction to end schedules the shared linger | listener close |
+| `socks5-linger` | one per listener | Marks a half-closed relay ended after `RELAY_LINGER_MS` and wakes its selector to close it | server close |
 | `socks5-udp-client`, `socks5-udp-send`, `socks5-udp-receive` | `UdpAssociation`, one set per association | Receive from the client, queue to the cellular socket, return replies | association close, idle timeout, control close or listener stop |
 | `proxy-profile-transfer` | `ProxyService.transfer` | One export or import on loopback | transfer done or failed |
 
-The CONNECT handler plus its relay means two threads per live connection, which
-is why `max_connections` is a setting and why the thread count is bounded.
-UDP has a bounded queue (`UDP_QUEUE`) and drops datagrams when it is full; an
-association with no traffic for `UDP_IDLE_MS` ends itself.
+An established CONNECT no longer holds a thread: the handshake pool is fixed at
+up to 32 and the relay is a fixed pool of two selector threads, so the thread
+count stays flat while a browser holds a hundred flows or a thousand
+connections sit idle. `max_connections` still bounds admission and is bounded
+by file descriptors and memory. UDP has a bounded queue (`UDP_QUEUE`) and
+drops datagrams when it is full; an association with no traffic for
+`UDP_IDLE_MS` ends itself.
 
 ### Locks
 
@@ -366,7 +372,8 @@ Compiles the Android-free classes without `android.jar` and runs the per-area
 suites under `test/org/phonelink/proxy/`: `Socks5TcpTest` (the handshake and
 both credential failures, anonymous mode, CONNECT over IPv4/IPv6/domain, a
 32 KiB relay, half-close and the bounded close), `Socks5LifecycleTest`
-(concurrency, saturation, refusals, client counts, retry, stop), `Socks5UdpTest`
+(concurrency, 1000 idle tunnels on the fixed thread pool, saturation,
+refusals, client counts, both byte counters, retry, stop), `Socks5UdpTest`
 (UDP ASSOCIATE framing, a real echo, fragments, the queue cap, control close and
 idle timeout), then the configuration rules, the SSID gate, both boot gates, the
 state text, egress selection, refusal and retry, the runtime listener, the tile
