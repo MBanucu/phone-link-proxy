@@ -118,5 +118,17 @@ android:value="socks proxy listener for the paired laptop" />
 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
 </intent-filter>
         </receiver>
+
+        <!-- Not exported: MY_PACKAGE_REPLACED is a system broadcast, and no
+             other app has a reason to start somebody's listener. An update
+             kills the process without a reliable sticky restart, so this is
+             the notice that brings the listener back when auto_start is on. -->
+        <receiver
+            android:name="org.phonelink.proxy.UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
