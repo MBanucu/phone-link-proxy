@@ -1,0 +1,1 @@
+CONNECT tunnels now run on a small fixed pool of selector threads instead of one thread per connection, so hundreds of browser connections no longer consume hundreds of threads. Throughput and the SOCKS behaviour are unchanged.
