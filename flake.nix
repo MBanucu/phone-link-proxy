@@ -78,6 +78,27 @@
                 touch $out
               '';
 
+          # The Python replacement for phone.sh, clock.sh and eta.sh: the
+          # hermetic suites use an adb stub, an ffmpeg stub and XML fixtures,
+          # so no phone, no SDK and no live run are involved. This runs beside
+          # `harness` while the shell helpers still own the run.
+          harness-python =
+            pkgs.runCommand "phone-link-proxy-harness-python-tests"
+              {
+                nativeBuildInputs = [
+                  pkgs.coreutils
+                  pkgs.python3
+                ];
+              }
+              ''
+                export HOME=$TMPDIR
+                export PYTHONDONTWRITEBYTECODE=1
+                export PYTHONPATH=${self.outPath}/tests/live
+                cd ${self.outPath}
+                python3 -m unittest discover -s tests/python -t . -v
+                touch $out
+              '';
+
           format = pkgs.runCommand "phone-link-proxy-format-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
             nixfmt --check ${./flake.nix} ${./default.nix}
             touch $out
