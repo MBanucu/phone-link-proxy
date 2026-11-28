@@ -15,6 +15,9 @@ side. The ownership split, version policy and change order are stated once, on
 the laptop side:
 [`docs/proxy-boundary.md`](https://github.com/MBanucu/phone-link/blob/main/docs/proxy-boundary.md).
 
+New to the code: [`docs/architecture.md`](docs/architecture.md) is the map — the
+layers, every class, the lifecycle, the state, and the file to open for a task.
+
 ## Store metadata
 
 `fastlane/metadata/android/en-US/` holds what a store listing needs: the title,

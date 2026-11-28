@@ -11,6 +11,8 @@ Notes for whoever — person or agent — is changing this checkout.
   instrumentation.
 - `src/`, `res/`, `AndroidManifest.xml` — the app. `test/` is the Android-free
   unit test, `capture/` and `devicetest/` are test-only.
+- `docs/architecture.md` — the app's layers, class table, lifecycle, state and
+  the file to open for a task.
 - `tests/proxy-app.test.sh` — hermetic, plain JDK, no phone.
 - `tests/live/` — the harness on a real phone (`proxy-app.sh` holds the steps
   and their claims, `phone.sh` how to look at and drive the phone). Needs a
