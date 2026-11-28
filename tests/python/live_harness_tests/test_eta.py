@@ -226,7 +226,7 @@ class EtaTest(support.Case):
         )
 
     def test_awk_six_significant_digits_round_trip(self) -> None:
-        # awk printed the median with its default OFMT (%.6g) before the shell
+        # awk printed the median with its default CONVFMT (%.6g) before the shell
         # turned it into milliseconds; a script that keeps full precision
         # would price a large step differently.
         path = self.write_timings(

@@ -15,9 +15,10 @@ runs:
   shell's ``full`` mode drops every row of such a run, including rows that
   come before the PARTIAL row; this does the same by collecting the run ids
   first.
-* awk printed a median with its default ``OFMT`` (six significant digits)
-  before the shell converted it to milliseconds, so 1234567 ms became
-  1234570000 ms. :func:`load` rounds the same way.
+* awk turned the median into a string with its default ``CONVFMT`` (six
+  significant digits) before the shell converted it to milliseconds, so
+  1234.5678 s became 1234570 ms, and a huge median reached exponent notation.
+  :func:`load` rounds the same way.
 * ``printf "%.0f"`` is C's rounding (half to even), which is what
   :func:`format` and ``format(value, ".0f")`` use.
 * :func:`left` is bash integer arithmetic: the over-estimate branch truncates.
@@ -99,7 +100,7 @@ def load(
             medians[step] = 0
             continue
         median = _median(window)
-        # awk's OFMT (%.6g) sits between the median and the millisecond.
+        # awk's CONVFMT (%.6g) sits between the median and the millisecond.
         medians[step] = int(format(float(format(median, ".6g")) * 1000.0, ".0f"))
     return medians
 
