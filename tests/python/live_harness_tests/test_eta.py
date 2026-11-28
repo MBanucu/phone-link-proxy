@@ -225,6 +225,33 @@ class EtaTest(support.Case):
             "a new step gets its own warning",
         )
 
+    def test_awk_six_significant_digits_round_trip(self) -> None:
+        # awk printed the median with its default OFMT (%.6g) before the shell
+        # turned it into milliseconds; a script that keeps full precision
+        # would price a large step differently.
+        path = self.write_timings(
+            "run,step,seconds,passed,failed,status\n"
+            "r1,panel,1234.5678,1,0,ok\n"
+            "r1,TOTAL,1234.6,1,0,ok\n",
+            "round.csv",
+        )
+        self.same(
+            eta.load(path).get("panel"),
+            1234570,
+            "the median goes through six significant digits",
+        )
+        path = self.write_timings(
+            "run,step,seconds,passed,failed,status\n"
+            "r1,panel,1234567.8,1,0,ok\n"
+            "r1,TOTAL,1234567.8,1,0,ok\n",
+            "round-large.csv",
+        )
+        self.same(
+            eta.load(path).get("panel"),
+            1234570000,
+            "and a large one goes through exponent notation",
+        )
+
     def test_results_fixture_is_read(self) -> None:
         path = self.write_timings(fixtures.RESULTS_TIMINGS, "results.csv")
         medians = eta.load(path)
