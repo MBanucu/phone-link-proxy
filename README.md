@@ -729,7 +729,14 @@ stopped are still readable: every change to the store rewrites
 line each — `auto_start`, `adb_wifi`, `wifi_lock`, `port`, `ssid`,
 `any_network`, `in_use`, `oem_autostart unreadable` —
 so `phone-doctor` can say what auto-start is set to and what Android's battery
-gate reports for a phone whose service is not running. It also carries
+gate reports for a phone whose service is not running. It also carries a
+non-secret saved-proxy index: `saved_index_version 1`, `saved_index_count <n>`,
+then one line per saved proxy in the form
+`saved_index <b64(name)> <port> <b64(user)> <anonymous 0|1> <auto_start 0|1> <b64(ssid)> <any_network 0|1>`
+(Base64URL, standard `=` padding, `~` for an empty field), or
+`saved_index none` when the count is 0. That lets a stopped service still
+report the saved names and ports; no password, token or export document is in
+the file. It also carries
 `last_boot no_broadcast <epoch seconds>` only when the observation is worth
 recording: no boot broadcast reached the app in the current boot and auto-start
 is on. That line states the observation and the time the app noticed, not a
