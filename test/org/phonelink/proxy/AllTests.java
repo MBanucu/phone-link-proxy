@@ -52,6 +52,7 @@ public final class AllTests {
         suites.add(new Suite("socks5-udp", new String[] {"udp"}, Socks5UdpTest::cases));
         suites.add(new Suite("uplink-policy", new String[] {"uplink"}, UplinkPolicyTest::cases));
         suites.add(new Suite("config", new String[] {}, ConfigTest::cases));
+        suites.add(new Suite("actions", new String[] {"contract"}, ActionsTest::cases));
         suites.add(new Suite("help", new String[] {}, HelpTest::cases));
         suites.add(new Suite("traffic", new String[] {}, TrafficTest::cases));
         suites.add(new Suite("event-log", new String[] {"log"}, EventLogTest::cases));

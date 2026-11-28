@@ -226,6 +226,10 @@ final class ConfigStore {
         StringBuilder text = new StringBuilder();
         ProxyConfig config = load(context);
         String inUse = inUse(context);
+        // The adb contract this build speaks. An integer with a documented
+        // history in Actions, never a token, password or feature string, so the
+        // laptop can tell an old app from a locked phone.
+        text.append(Actions.stateLine()).append('\n');
         text.append("auto_start ").append(autoStart(context)).append('\n');
         text.append("adb_wifi ").append(adbWireless(context)).append('\n');
         text.append("wifi_lock ").append(wifiLock(context)).append('\n');

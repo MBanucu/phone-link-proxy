@@ -50,19 +50,19 @@ public final class ProxyService extends Service implements Port.Host {
 
     static final String TAG = "phone-link-proxy";
 
-    static final String ACTION_START = "org.phonelink.proxy.action.START";
+    static final String ACTION_START = Actions.ACTION_START;
     /** Stop everything, or with --es profile/--ei port just that one. */
-    static final String ACTION_STOP = "org.phonelink.proxy.action.STOP";
+    static final String ACTION_STOP = Actions.ACTION_STOP;
     /** Keep the configuration the service has under a name, and stop. */
-    static final String ACTION_SAVE_PROFILE = "org.phonelink.proxy.action.SAVE_PROFILE";
+    static final String ACTION_SAVE_PROFILE = Actions.ACTION_SAVE_PROFILE;
     /** Remove a saved configuration by name. */
-    static final String ACTION_DELETE_PROFILE = "org.phonelink.proxy.action.DELETE_PROFILE";
+    static final String ACTION_DELETE_PROFILE = Actions.ACTION_DELETE_PROFILE;
     /** Give a saved configuration another name: --es profile OLD --es to NEW. */
-    static final String ACTION_RENAME_PROFILE = "org.phonelink.proxy.action.RENAME_PROFILE";
+    static final String ACTION_RENAME_PROFILE = Actions.ACTION_RENAME_PROFILE;
     /** Pull every saved proxy over a one-shot loopback socket, unlocked only. */
-    static final String ACTION_EXPORT = "org.phonelink.proxy.action.EXPORT";
+    static final String ACTION_EXPORT = Actions.ACTION_EXPORT;
     /** Put a ProfileDocument back over a one-shot loopback socket, unlocked only. */
-    static final String ACTION_IMPORT = "org.phonelink.proxy.action.IMPORT";
+    static final String ACTION_IMPORT = Actions.ACTION_IMPORT;
     /**
      * The loopback port an export/import binds for its one connection. Not the
      * listener's SOCKS port, which the same extra spells for a START.
@@ -140,13 +140,14 @@ public final class ProxyService extends Service implements Port.Host {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String action = intent == null ? ACTION_START : intent.getAction();
-        boolean stopping = ACTION_STOP.equals(action);
-        boolean saving = ACTION_SAVE_PROFILE.equals(action);
-        boolean deleting = ACTION_DELETE_PROFILE.equals(action);
-        boolean renaming = ACTION_RENAME_PROFILE.equals(action);
-        boolean exporting = ACTION_EXPORT.equals(action);
-        boolean importing = ACTION_IMPORT.equals(action);
+        // The table decides what this build accepts, which extras it needs and
+        // which gate applies. An intent with no action is the panel's and the
+        // boot receiver's ordinary start, exactly as before the table existed.
+        String asked = intent == null ? ACTION_START : intent.getAction();
+        if (asked == null) {
+            asked = ACTION_START;
+        }
+        Actions.Action action = Actions.find(asked);
         // A service that was already doing something is not restarted by a
         // save or a delete, and a start that only came for one has to go away
         // again.
@@ -156,46 +157,71 @@ public final class ProxyService extends Service implements Port.Host {
         // Must happen within five seconds of startForegroundService(), which is
         // how the scripts deliver a stop as well: a stop that skipped this was
         // reported as a foreground service that never reached the foreground.
-        boolean foreground = beginForeground(stopping
-                ? "stopping"
-                : saving ? "saving"
-                : deleting ? "deleting"
-                : renaming ? "renaming"
-                : exporting ? "exporting"
-                : importing ? "importing" : "starting");
-        if (exporting || importing) {
-            transfer(exporting, intent, startId);
-            return START_NOT_STICKY;
-        }
-        if (action != null && !ACTION_START.equals(action)) {
+        boolean foreground = beginForeground(
+                action == null ? "starting" : action.progress);
+        if (action == null) {
             // An action this build does not know must not fall through to a
             // start: that is how an older app answered EXPORT by starting a
             // listener and printing nothing the laptop could use.
-            reportFailure(getString(R.string.error_unknown_action, action));
+            reportFailure(getString(R.string.error_unknown_action, asked));
             if (ports.isEmpty()) {
                 stopSelf();
             }
             return START_NOT_STICKY;
         }
-        if (stopping) {
-            stopRequested(intent);
-            // A stop of one listener beside others leaves a service that is
-            // still somebody's uplink and must come back if the system kills it.
-            return stickiness();
+
+        // Missing or invalid required extras are named here, before a handler
+        // can mistake them for an empty store or a timeout.
+        Actions.Problem problem = Actions.check(action, values(intent));
+        if (problem != null) {
+            reportFailure(problem.message());
+            if (ports.isEmpty()) {
+                stopSelf();
+            }
+            return START_NOT_STICKY;
         }
-        if (saving) {
-            saveCurrent(intent, first);
-            return stickiness();
+
+        switch (action.name) {
+            case Actions.EXPORT:
+            case Actions.IMPORT:
+                if (action.gate == Actions.Gate.UNLOCKED && !unlocked()) {
+                    // The screen is the gate: no socket exists behind a locked
+                    // keyguard, so the laptop's connect cannot be answered.
+                    reportFailure(getString(R.string.error_transfer_locked));
+                    if (ports.isEmpty()) {
+                        stopSelf();
+                    }
+                    return START_NOT_STICKY;
+                }
+                transfer(Actions.EXPORT.equals(action.name), intent, startId);
+                return START_NOT_STICKY;
+            case Actions.STOP:
+                stopRequested(intent);
+                // A stop of one listener beside others leaves a service that is
+                // still somebody's uplink and must come back if the system kills it.
+                return stickiness();
+            case Actions.SAVE_PROFILE:
+                saveCurrent(intent, first);
+                return stickiness();
+            case Actions.DELETE_PROFILE:
+                deleteSaved(intent, first);
+                return stickiness();
+            case Actions.RENAME_PROFILE:
+                renameSaved(intent, first);
+                return stickiness();
+            case Actions.START:
+                break;
+            default:
+                // The table named an action this dispatch does not handle;
+                // that is a build bug, and it still must not fall through to a
+                // start that answers with a listener instead of an error.
+                reportFailure(getString(R.string.error_unknown_action, asked));
+                if (ports.isEmpty()) {
+                    stopSelf();
+                }
+                return START_NOT_STICKY;
         }
-        if (deleting) {
-            deleteSaved(intent, first);
-            return stickiness();
-        }
-        if (renaming) {
-            renameSaved(intent, first);
-            return stickiness();
-        }
-        if (!foreground) {
+        if (action.gate == Actions.Gate.FOREGROUND && !foreground) {
             // Starting from the shade or at boot needs location "all the time";
             // from the panel it works without it.
             fail(getString(R.string.error_background_start));
@@ -227,6 +253,58 @@ public final class ProxyService extends Service implements Port.Host {
      */
     private int stickiness() {
         return ports.isEmpty() ? START_NOT_STICKY : START_STICKY;
+    }
+
+    /**
+     * The intent's extras as the action table reads them. The request is
+     * deliberately small: the table never needs a value the action would not
+     * accept, and a value it does not accept is refused, not logged.
+     */
+    private static Actions.Values values(Intent intent) {
+        return new Actions.Values() {
+            @Override
+            public boolean has(String name) {
+                return intent != null && intent.hasExtra(name);
+            }
+
+            @Override
+            public String string(String name) {
+                if (intent == null) {
+                    return null;
+                }
+                try {
+                    return intent.getStringExtra(name);
+                } catch (RuntimeException e) {
+                    // An extra of the wrong type is an invalid extra, not a
+                    // reason to crash the service before it can say so.
+                    return null;
+                }
+            }
+
+            @Override
+            public int integer(String name) {
+                if (intent == null) {
+                    return 0;
+                }
+                try {
+                    return intent.getIntExtra(name, 0);
+                } catch (RuntimeException e) {
+                    return 0;
+                }
+            }
+        };
+    }
+
+    /**
+     * "Unlocked" means the screen is on and the keyguard is not: a phone with
+     * no secure lock still has an off screen, and a transfer must not create a
+     * socket behind it.
+     */
+    private boolean unlocked() {
+        PowerManager power = getSystemService(PowerManager.class);
+        KeyguardManager keyguard = getSystemService(KeyguardManager.class);
+        return power != null && power.isInteractive()
+                && keyguard != null && !keyguard.isKeyguardLocked();
     }
 
     /**
@@ -309,6 +387,10 @@ public final class ProxyService extends Service implements Port.Host {
         writer.println(Help.text(getPackageName()));
         writer.println();
         writer.println("Right now");
+        // The contract's version and the actions this build accepts, both from
+        // the one table, so the laptop can refuse an old app before it loses a
+        // transfer to a timeout.
+        writer.print(Actions.dump());
         List<Port> all = ports.all();
         writer.println("  state       " + ProxyState.summary(ports.states()));
         // The saved configuration asked for by the last start, which is what the
@@ -707,33 +789,13 @@ public final class ProxyService extends Service implements Port.Host {
      * One {@code EXPORT} or {@code IMPORT}, on a worker thread: the socket waits
      * up to a minute for the laptop, and {@link #onStartCommand} must return.
      *
-     * <p>The gate is here, before the socket exists: a locked phone never binds,
-     * so nothing can be pulled from it by an adb session left behind. The action
-     * fails closed for bad extras and for a second transfer as well.
+     * <p>The extras and the unlocked gate were checked from the action table
+     * before this was called, so a missing port, a bad token or a locked screen
+     * never reaches the socket. A second transfer still fails closed here.
      */
     private void transfer(boolean exporting, Intent intent, int startId) {
         int port = intent == null ? 0 : intent.getIntExtra(EXTRA_TRANSFER_PORT, 0);
         String token = intent == null ? null : intent.getStringExtra(EXTRA_TOKEN);
-        if (!ProfileTransfer.validPort(port) || !ProfileTransfer.validToken(token)) {
-            reportFailure(getString(R.string.error_transfer_extras));
-            if (ports.isEmpty()) {
-                stopSelf();
-            }
-            return;
-        }
-        // "Unlocked" means the screen is on and the keyguard is not: a phone
-        // with no secure lock still has an off screen, and a socket must not
-        // exist behind it.
-        PowerManager power = getSystemService(PowerManager.class);
-        KeyguardManager keyguard = getSystemService(KeyguardManager.class);
-        if (power == null || !power.isInteractive()
-                || keyguard == null || keyguard.isKeyguardLocked()) {
-            reportFailure(getString(R.string.error_transfer_locked));
-            if (ports.isEmpty()) {
-                stopSelf();
-            }
-            return;
-        }
         if (!transferring.begin()) {
             // Never stop the service here: the first transfer is still using it.
             reportFailure(getString(R.string.error_transfer_busy));

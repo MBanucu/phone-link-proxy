@@ -245,7 +245,9 @@ first and takes the app's saved proxies with it.
   oversized datagrams dropped without ending it, and the association ending
   with its control connection, its idle timeout and a listener stop; the
   configuration rules (port range, the connection ceiling's bounds and its
-  profile round-trip, credentials, anonymous, SSID, byte limits);
+  profile round-trip, credentials, anonymous, SSID, byte limits); the one action
+  table, with a missing or bad extra named precisely, and the generated help,
+  `dumpsys` and README blocks compared to it;
   the cellular egress selection (a validated Wi-Fi default never wins over
   cellular, and a non-cellular resolution is refused), its retry state and its
   dump line;
@@ -431,6 +433,33 @@ adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
 adb shell am start-foreground-service -n org.phonelink.proxy/.ProxyService \
     -a org.phonelink.proxy.action.STOP
 ```
+
+### Adb actions
+
+This build speaks `contract_version 1`, an integer with a documented history in
+`Actions`; `dumpsys` and the non-secret `state.txt` both carry it, so the laptop
+can tell a build that is too old from a phone whose screen is locked. The
+table below is generated from the app's one `Actions` table, and the unit suite
+refuses a README that does not match it. No action, extra or version line holds
+a token, password or export document.
+
+<!-- adb-actions:start -->
+| action | required extras | optional extras | gate | what it does |
+|---|---|---|---|---|
+| `START` | — | `--ei port N (1024..65535)`, `--ei max_connections N (16..1024)`, `--es user NAME (at most 255 bytes)`, `--es password PASS (at most 255 bytes)`, `--es ssid NAME`, `--ez anonymous BOOL`, `--ez any_network BOOL`, `--ez auto_start BOOL`, `--ez wifi_lock BOOL`, `--ez adb_wifi BOOL`, `--es profile NAME (non-empty)` | foreground | start or replace the listener on its port; omitted extras reuse the stored values |
+| `STOP` | — | `--es profile NAME (non-empty)`, `--ei port N (1024..65535)` | none | stop every listener, or the one named |
+| `SAVE_PROFILE` | `--es profile NAME (non-empty)` | — | none | keep the current configuration under a name |
+| `DELETE_PROFILE` | `--es profile NAME (non-empty)` | — | none | remove a saved configuration by name |
+| `RENAME_PROFILE` | `--es profile NAME (non-empty)`, `--es to NEWNAME (non-empty)` | — | none | give a saved configuration another name |
+| `EXPORT` | `--ei port N (1024..65535)`, `--es token TOKEN (1..128 printable ASCII)` | — | unlocked | send every saved proxy over a one-shot loopback socket |
+| `IMPORT` | `--ei port N (1024..65535)`, `--es token TOKEN (1..128 printable ASCII)` | — | unlocked | read a ProfileDocument back over a loopback socket |
+<!-- adb-actions:end -->
+
+Every START extra is optional and a start that omits one reuses the stored
+value; on a fresh install it still needs a `user` and `password`, or
+`anonymous=true` (see Settings). The `gate` column says which actions need the
+service in the foreground and which need the screen on and the keyguard
+unlocked.
 
 `-g` grants `POST_NOTIFICATIONS` at install; the foreground notification is
 what keeps the service out of the background-start rules, and it carries a Stop
