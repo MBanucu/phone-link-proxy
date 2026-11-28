@@ -23,7 +23,7 @@ public final class Socks5LifecycleTest {
     static void cases() {
         run("a CONNECT lost to a timeout is retried once with a fresh upstream", () -> {
             try (FlakyUpstream upstream =
-                            new FlakyUpstream(1, Socks5Server.REPLY_HOST_UNREACHABLE);
+                            new FlakyUpstream(1, Handshake.REPLY_HOST_UNREACHABLE);
                     Fixture fixture = new Fixture(USER, PASSWORD, upstream);
                     Socket socket = fixture.open()) {
                 connect(socket);
@@ -39,12 +39,12 @@ public final class Socks5LifecycleTest {
 
         run("a refused CONNECT is reported without a retry", () -> {
             try (FlakyUpstream upstream = new FlakyUpstream(
-                            Integer.MAX_VALUE, Socks5Server.REPLY_CONNECTION_REFUSED);
+                            Integer.MAX_VALUE, Handshake.REPLY_CONNECTION_REFUSED);
                     Fixture fixture = new Fixture(USER, PASSWORD, upstream);
                     Socket socket = fixture.open()) {
                 handshake(socket);
                 requestConnect(socket, 0x01, 0x01, "127.0.0.1", 80);
-                assertEqual(Socks5Server.REPLY_CONNECTION_REFUSED, readReply(socket), "reply code");
+                assertEqual(Handshake.REPLY_CONNECTION_REFUSED, readReply(socket), "reply code");
                 assertEqual(1, upstream.attempts.get(), "upstream attempts");
             }
         });

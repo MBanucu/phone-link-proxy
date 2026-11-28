@@ -24,7 +24,7 @@ public final class Socks5UdpTest {
             byte[] payload = "quic".getBytes(StandardCharsets.UTF_8);
             InetAddress v4 = InetAddress.getByName("192.0.2.7");
             byte[] request = udpRequest(v4, 443, payload, 0);
-            Socks5Server.UdpPacket parsed = Socks5Server.UdpPacket.parse(
+            UdpPacket parsed = UdpPacket.parse(
                     request, request.length, Socks5Server.UDP_MAX_DATAGRAM);
             assertTrue(parsed != null, "an IPv4 request was dropped");
             assertTrue(v4.equals(parsed.address), "IPv4 address");
@@ -36,7 +36,7 @@ public final class Socks5UdpTest {
             InetAddress v6 = InetAddress.getByName("2001:db8::7");
             byte[] six = udpRequest(v6, 53, payload, 0);
             assertEqual(0x04, six[3] & 0xFF, "IPv6 address type");
-            parsed = Socks5Server.UdpPacket.parse(
+            parsed = UdpPacket.parse(
                     six, six.length, Socks5Server.UDP_MAX_DATAGRAM);
             assertTrue(parsed != null, "an IPv6 request was dropped");
             assertTrue(v6.equals(parsed.address), "IPv6 address");
@@ -44,17 +44,17 @@ public final class Socks5UdpTest {
 
             byte[] named = udpRequest("dns.example", 53, payload, 0);
             assertEqual(0x03, named[3] & 0xFF, "domain address type");
-            parsed = Socks5Server.UdpPacket.parse(
+            parsed = UdpPacket.parse(
                     named, named.length, Socks5Server.UDP_MAX_DATAGRAM);
             assertTrue(parsed != null, "a domain request was dropped");
             assertEqual("dns.example", parsed.host, "domain name");
             assertTrue(parsed.address == null, "a domain is not resolved while parsing");
 
-            byte[] reply = Socks5Server.UdpPacket.encode(
+            byte[] reply = UdpPacket.encode(
                     v6, 443, payload, payload.length, Socks5Server.UDP_MAX_DATAGRAM);
             assertTrue(reply != null, "the reply was not encoded");
             assertEqual(0x04, reply[3] & 0xFF, "an IPv6 source gets an IPv6 reply header");
-            parsed = Socks5Server.UdpPacket.parse(
+            parsed = UdpPacket.parse(
                     reply, reply.length, Socks5Server.UDP_MAX_DATAGRAM);
             assertTrue(parsed != null, "the encoded reply did not parse");
             assertTrue(v6.equals(parsed.address), "the reply source address");
@@ -68,31 +68,31 @@ public final class Socks5UdpTest {
             byte[] payload = "hello".getBytes(StandardCharsets.UTF_8);
 
             byte[] fragmented = udpRequest(destination, 443, payload, 1);
-            assertTrue(Socks5Server.UdpPacket.parse(
+            assertTrue(UdpPacket.parse(
                     fragmented, fragmented.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
                     "FRAG=1 was accepted");
 
             byte[] shortPacket = new byte[] {0, 0, 0};
-            assertTrue(Socks5Server.UdpPacket.parse(
+            assertTrue(UdpPacket.parse(
                     shortPacket, shortPacket.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
                     "a three-byte request was accepted");
 
             byte[] truncated = Arrays.copyOf(udpRequest(destination, 443, payload, 0), 9);
-            assertTrue(Socks5Server.UdpPacket.parse(
+            assertTrue(UdpPacket.parse(
                     truncated, truncated.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
                     "an IPv4 header cut before its port was accepted");
 
             byte[] badType = udpRequest(destination, 443, payload, 0);
             badType[3] = 0x02;
-            assertTrue(Socks5Server.UdpPacket.parse(
+            assertTrue(UdpPacket.parse(
                     badType, badType.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
                     "an unknown address type was accepted");
 
             byte[] oversized = new byte[Socks5Server.UDP_MAX_DATAGRAM + 1];
-            assertTrue(Socks5Server.UdpPacket.parse(
+            assertTrue(UdpPacket.parse(
                     oversized, oversized.length, Socks5Server.UDP_MAX_DATAGRAM) == null,
                     "a datagram over the cap was accepted");
-            assertTrue(Socks5Server.UdpPacket.encode(
+            assertTrue(UdpPacket.encode(
                     destination, 443, new byte[100], 100, 64) == null,
                     "an encoded reply over the cap was accepted");
         });
@@ -111,7 +111,7 @@ public final class Socks5UdpTest {
                 sendUdp(udp, reply.bound, udpRequest(
                         InetAddress.getByName("127.0.0.1"), echo.port(), payload, 0));
                 byte[] answer = receiveUdp(udp);
-                Socks5Server.UdpPacket parsed = Socks5Server.UdpPacket.parse(
+                UdpPacket parsed = UdpPacket.parse(
                         answer, answer.length, Socks5Server.UDP_MAX_DATAGRAM);
                 assertTrue(parsed != null, "the reply did not parse");
                 assertEqual(echo.port(), parsed.port, "the reply comes from the echo port");
@@ -146,7 +146,7 @@ public final class Socks5UdpTest {
                 sendUdp(udp, reply.bound,
                         udpRequest(destination, echo.port(), payload, 0));
                 byte[] answer = receiveUdp(udp);
-                Socks5Server.UdpPacket parsed = Socks5Server.UdpPacket.parse(
+                UdpPacket parsed = UdpPacket.parse(
                         answer, answer.length, Socks5Server.UDP_MAX_DATAGRAM);
                 assertTrue(parsed != null, "the reply after the drops did not parse");
                 assertTrue(Arrays.equals(payload,

@@ -245,7 +245,7 @@ final class Egress implements Upstream, Closeable {
         try {
             addresses = network.getAllByName(host);
         } catch (UnknownHostException e) {
-            throw new Upstream.Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+            throw new Upstream.Failure(Handshake.REPLY_HOST_UNREACHABLE,
                     "cannot resolve " + host + " on the cellular network");
         }
 
@@ -295,7 +295,7 @@ final class Egress implements Upstream, Closeable {
             return socket;
         } catch (IOException e) {
             Closeables.closeQuietly(socket);
-            throw new Upstream.Failure(Socks5Server.REPLY_GENERAL_FAILURE,
+            throw new Upstream.Failure(Handshake.REPLY_GENERAL_FAILURE,
                     "cannot open a UDP socket on the cellular network: " + e.getMessage());
         }
     }
@@ -311,7 +311,7 @@ final class Egress implements Upstream, Closeable {
         try {
             return network.getAllByName(host);
         } catch (UnknownHostException e) {
-            throw new Upstream.Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+            throw new Upstream.Failure(Handshake.REPLY_HOST_UNREACHABLE,
                     "cannot resolve " + host + " on the cellular network");
         }
     }
@@ -329,7 +329,7 @@ final class Egress implements Upstream, Closeable {
             synchronized (lock) {
                 reason = state.reason(SystemClock.elapsedRealtime());
             }
-            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
+            throw new Upstream.Failure(Handshake.REPLY_NETWORK_UNREACHABLE,
                     "no usable cellular egress for " + what + ": " + reason);
         }
 
@@ -340,7 +340,7 @@ final class Egress implements Upstream, Closeable {
                 link(network, manager.getNetworkCapabilities(network)));
         if (refusal != null) {
             refuse(network, refusal);
-            throw new Upstream.Failure(Socks5Server.REPLY_NETWORK_UNREACHABLE,
+            throw new Upstream.Failure(Handshake.REPLY_NETWORK_UNREACHABLE,
                     "refusing " + what + ": " + refusal);
         }
         return network;
@@ -458,12 +458,12 @@ final class Egress implements Upstream, Closeable {
 
     private static int replyFor(IOException failure) {
         if (failure instanceof SocketTimeoutException) {
-            return Socks5Server.REPLY_HOST_UNREACHABLE;
+            return Handshake.REPLY_HOST_UNREACHABLE;
         }
         if (failure instanceof ConnectException) {
-            return Socks5Server.REPLY_CONNECTION_REFUSED;
+            return Handshake.REPLY_CONNECTION_REFUSED;
         }
-        return Socks5Server.REPLY_GENERAL_FAILURE;
+        return Handshake.REPLY_GENERAL_FAILURE;
     }
 
 }

@@ -36,8 +36,10 @@ ProxyService  ──►  Ports  ──►  Port  ──►  Socks5Server
   and transfers. `Ports` is its map of listeners.
 - **Listener** — one `Port` owns one `Uplink` gate and one `Socks5Server`; it
   binds and pauses as the phone's Wi-Fi changes.
-- **Protocol** — `Socks5Server` speaks SOCKS5 and asks `Upstream` for every
-  socket. It has no Android types.
+- **Protocol** — `Socks5Server` binds, admits and owns the sockets;
+  `Handshake` greets and parses, `TcpRelay` carries CONNECT, `UdpAssociation`
+  carries UDP ASSOCIATE, and `Socks5Request`/`UdpPacket` are the pure framing.
+  Every one of them has no Android types.
 - **Egress** — `Egress` implements `Upstream` with a cellular
   `NetworkRequest`; `EgressPolicy` decides which link may carry a socket.
 - **Android** — connectivity callbacks, Wi-Fi information, locks, keyguard,
@@ -69,7 +71,12 @@ means the name is internal.
 | [`ProxyRuntime.java`](../src/org/phonelink/proxy/ProxyRuntime.java) | The running listeners shared with the panel and tile; a static list, no binder. | app (static) | no |
 | [`EventLog.java`](../src/org/phonelink/proxy/EventLog.java) | The last 200 events in memory, tagged by saved proxy. | app (static) | no |
 | [`TransferGate.java`](../src/org/phonelink/proxy/TransferGate.java) | One export or import at a time, across threads. | `ProxyService` | no |
-| [`Socks5Server.java`](../src/org/phonelink/proxy/Socks5Server.java) | SOCKS5 CONNECT and UDP ASSOCIATE, authentication, admission, relay threads. | `Port` | no |
+| [`Socks5Server.java`](../src/org/phonelink/proxy/Socks5Server.java) | The listener: bind, accept, admission, client counts, the socket and association sets, and stop. | `Port` | no |
+| [`Handshake.java`](../src/org/phonelink/proxy/Handshake.java) | The greeting, RFC 1929 authentication, request parsing and reply framing. | one connection | no |
+| [`TcpRelay.java`](../src/org/phonelink/proxy/TcpRelay.java) | One CONNECT: open the upstream with its retry, reply, pump both directions, bounded linger. | `Socks5Server` | no |
+| [`UdpAssociation.java`](../src/org/phonelink/proxy/UdpAssociation.java) | One UDP ASSOCIATE: relay and cellular sockets, bounded queue, client pinning, idle timer. | `Socks5Server` | no |
+| [`Socks5Request.java`](../src/org/phonelink/proxy/Socks5Request.java) | One parsed request: its command and destination, Android-free. | one connection | no |
+| [`UdpPacket.java`](../src/org/phonelink/proxy/UdpPacket.java) | The SOCKS5 UDP request/reply header, parsed and encoded, Android-free. | none (static) | no |
 | [`Upstream.java`](../src/org/phonelink/proxy/Upstream.java) | The seam: `connect`, `datagram` and `resolve` on the egress network. | contract; `Egress` implements it | no |
 | [`Traffic.java`](../src/org/phonelink/proxy/Traffic.java) | Byte totals and a minute of per-second samples for one listener. | `Port` | no |
 | [`Closeables.java`](../src/org/phonelink/proxy/Closeables.java) | Close-without-throwing, including the bounded linger that avoids orphaned TCP tuples. | none (static) | no |
@@ -186,10 +193,10 @@ it; a socket admitted after `close()` is reset instead of served.
 | main | Android | Service/activity callbacks, bind/pause/close, locks, publishing | process |
 | connectivity callbacks | `ConnectivityManager` on the main looper | Feed `Uplink`/`Egress`; call `evaluate` | unregistered on close |
 | `socks5-accept` | `Socks5Server.start` | Accept, track, dispatch; reset on refusal | listener close |
-| `socks5-handler` pool | `Socks5Server` | Greeting, auth, request; then client→upstream for CONNECT, or hold the UDP control connection | connection ends; idle core threads time out |
-| `socks5-relay` | one per CONNECT | Upstream→client; first direction to end schedules the shared linger | both sockets closed |
+| `socks5-handler` pool | `Socks5Server` | Greeting, auth, request; then `TcpRelay` serves the CONNECT, or `UdpAssociation` holds the UDP control connection | connection ends; idle core threads time out |
+| `socks5-relay` | `TcpRelay`, one per CONNECT | Upstream→client; first direction to end schedules the shared linger | both sockets closed |
 | `socks5-linger` | one per listener | Bounded close of a half-closed relay after `RELAY_LINGER_MS` | server close |
-| `socks5-udp-client`, `socks5-udp-send`, `socks5-udp-receive` | one set per UDP association | Receive from the client, queue to the cellular socket, return replies | association close, idle timeout, control close or listener stop |
+| `socks5-udp-client`, `socks5-udp-send`, `socks5-udp-receive` | `UdpAssociation`, one set per association | Receive from the client, queue to the cellular socket, return replies | association close, idle timeout, control close or listener stop |
 | `proxy-profile-transfer` | `ProxyService.transfer` | One export or import on loopback | transfer done or failed |
 
 The CONNECT handler plus its relay means two threads per live connection, which
@@ -330,7 +337,7 @@ writing it.
 | Task | First file | Test |
 |---|---|---|
 | Add or change an adb action | `ProxyService.java` (`ACTION_*`, `onStartCommand`), then `Help.java` and the README | `bash tests/proxy-app.test.sh` pins the help text; `bash tests/live/proxy-app.sh` drives the action over adb |
-| Change SOCKS behaviour (auth, CONNECT, UDP, replies, limits) | `Socks5Server.java`; `Upstream.java` if the seam moves | `bash tests/proxy-app.test.sh` — the protocol cases, including UDP and saturation |
+| Change SOCKS behaviour (auth, CONNECT, UDP, replies, limits) | `Handshake.java` for auth/requests/replies, `TcpRelay.java` for CONNECT, `UdpAssociation.java` for UDP; `Socks5Server.java` for admission and stop | `bash tests/proxy-app.test.sh` — the protocol cases, including UDP and saturation |
 | Change where upstream traffic leaves | `Egress.java`; `EgressPolicy.java` / `EgressState.java` for the rule and retry | `bash tests/proxy-app.test.sh` — egress selection, refusal and retry; a phone run for the real interface |
 | Change the panel | `MainActivity.java`, then `HomeScreen.java` / `ProxyScreen.java`; `TrafficView.java` for the sparkline | `bash tests/live/proxy-app.sh` (panel steps) and the in-process `devicetest/` checks |
 | Change the transfer | `ProfileDocument.java` for the format, `ProfileTransfer.java` for the wire, `ProxyService.transfer` for the gate | `bash tests/proxy-app.test.sh` — document round-trip, framing, token and limits |
@@ -345,14 +352,16 @@ Two suites, on purpose: one needs only a JDK, the other needs a phone.
 
 ### Hermetic: `bash tests/proxy-app.test.sh`
 
-Compiles the Android-free classes without `android.jar` and runs
-`test/org/phonelink/proxy/ProxyAppTest.java`: the SOCKS5 handshake and both
-credential failures, anonymous mode, CONNECT over IPv4/IPv6/domain, 32 KiB
-relay, half-close and linger, concurrency, saturation, refusals, client counts;
-UDP ASSOCIATE framing, a real echo, fragments, the queue cap, control close and
-idle timeout; the configuration rules; the SSID gate; both boot gates; the state
-text; egress selection, refusal and retry; the runtime listener; the tile plan
-and cycle; `ProfileDocument` and `ProfileTransfer`; `Help`'s contract text.
+Compiles the Android-free classes without `android.jar` and runs the per-area
+suites under `test/org/phonelink/proxy/`: `Socks5TcpTest` (the handshake and
+both credential failures, anonymous mode, CONNECT over IPv4/IPv6/domain, a
+32 KiB relay, half-close and the bounded close), `Socks5LifecycleTest`
+(concurrency, saturation, refusals, client counts, retry, stop), `Socks5UdpTest`
+(UDP ASSOCIATE framing, a real echo, fragments, the queue cap, control close and
+idle timeout), then the configuration rules, the SSID gate, both boot gates, the
+state text, egress selection, refusal and retry, the runtime listener, the tile
+plan and cycle, `ProfileDocument` and `ProfileTransfer`, and `Help`'s contract
+text. `AllTests` names the suites; `TestSupport` is the shared harness.
 
 It is also the flake's `unit` check, so `nix flake check` runs it.
 
