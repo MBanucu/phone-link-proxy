@@ -125,7 +125,7 @@ jobs:
           set -eu
           cat > "$RUNNER_TEMP/build-release.sh" <<'SCRIPT'
           set -eu
-          ./build.sh --release
+          ./build.sh --release --bundle
           apksigner=$(ls -d "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -1)
           certs=$("$apksigner" verify --print-certs build/phone-link-proxy.apk)
           printf "%s\n" "$certs"
@@ -149,7 +149,23 @@ jobs:
             echo "::error::the APK certificate is $got, not ANDROID_CERT_SHA256 ($want)" >&2
             exit 1
           fi
-          echo "certificate fingerprint matches ANDROID_CERT_SHA256"
+          echo "APK certificate fingerprint matches ANDROID_CERT_SHA256"
+
+          # The bundle carries the same key. keytool reads the JAR signature a
+          # jarsigner-signed AAB has; apksigner cannot open one.
+          aab=build/phone-link-proxy.aab
+          keytool -printcert -jarfile "$aab" > "$RUNNER_TEMP/aab-certs.txt"
+          got=$(sed -n 's/^[[:space:]]*SHA256: //p' "$RUNNER_TEMP/aab-certs.txt" |
+            tr 'A-F' 'a-f' | tr -d ' :')
+          if [ -z "$got" ]; then
+            echo "::error::could not read the AAB's SHA-256 fingerprint" >&2
+            exit 1
+          fi
+          if [ "$got" != "$want" ]; then
+            echo "::error::the AAB certificate is $got, not ANDROID_CERT_SHA256 ($want)" >&2
+            exit 1
+          fi
+          echo "AAB certificate fingerprint matches ANDROID_CERT_SHA256"
           SCRIPT
           chmod +x "$RUNNER_TEMP/build-release.sh"
           nix develop --command "$RUNNER_TEMP/build-release.sh"
@@ -169,12 +185,15 @@ jobs:
           fi
           asset="$RUNNER_TEMP/phone-link-proxy-$version.apk"
           cp build/phone-link-proxy.apk "$asset"
+          aab="$RUNNER_TEMP/phone-link-proxy-$version.aab"
+          cp build/phone-link-proxy.aab "$aab"
           (cd "$RUNNER_TEMP" &&
-            sha256sum "phone-link-proxy-$version.apk" > "phone-link-proxy-$version.apk.sha256")
+            sha256sum "phone-link-proxy-$version.apk" > "phone-link-proxy-$version.apk.sha256" &&
+            sha256sum "phone-link-proxy-$version.aab" > "phone-link-proxy-$version.aab.sha256")
           # A release for the tag may already exist with notes written by hand:
           # upload into it instead of failing, and replace what a re-run left.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --generate-notes --title "$TAG"
           fi
-          gh release upload "$TAG" "$asset" "$asset.sha256" --clobber
-          echo "attached $(basename "$asset") to $TAG" >> "$GITHUB_STEP_SUMMARY"
+          gh release upload "$TAG" "$asset" "$asset.sha256" "$aab" "$aab.sha256" --clobber
+          echo "attached $(basename "$asset") and $(basename "$aab") to $TAG" >> "$GITHUB_STEP_SUMMARY"

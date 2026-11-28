@@ -19,8 +19,10 @@ let
     };
   };
   sdk = androidPkgs.androidenv.composeAndroidPackages {
-    buildToolsVersions = [ "35.0.0" ];
-    platformVersions = [ "35" ];
+    # Google Play refuses a new app or an update that targets less than API 36
+    # since 2026-08-31, and the AAB is linked against the same platform.
+    buildToolsVersions = [ "36.0.0" ];
+    platformVersions = [ "36" ];
     includeCmake = false;
     includeEmulator = false;
     includeNDK = false;
@@ -36,6 +38,9 @@ in
     packages = [
       androidPkgs.jdk17
       androidPkgs.zip
+      # The AAB path: aapt2 links the module in proto format and bundletool
+      # packs it. Not used by the four APKs.
+      pkgs.bundletool
     ];
     ANDROID_SDK_ROOT = sdkRoot;
     shellHook = ''
@@ -83,5 +88,26 @@ in
         # inside the proxy's process; nothing installs them but a test run.
         install -Dm644 app/build/capture.apk $out/capture.apk
         install -Dm644 app/build/devicetest.apk $out/devicetest.apk
+      '';
+
+  # The Google Play artifact. AABs are built from the same compiled code and
+  # resources as the APK; only the packaging and the signing differ (Play
+  # requires a JAR signature, so build.sh uses jarsigner for this one).
+  aab =
+    pkgs.runCommand "phone-link-proxy-aab"
+      {
+        nativeBuildInputs = [
+          androidPkgs.jdk17
+          androidPkgs.zip
+          androidPkgs.bundletool
+        ];
+        ANDROID_SDK_ROOT = sdkRoot;
+      }
+      ''
+        export HOME=$TMPDIR
+        cp -r ${./.} app
+        chmod -R u+w app
+        ./app/build.sh --bundle
+        install -Dm644 app/build/phone-link-proxy.aab $out/phone-link-proxy.aab
       '';
 }

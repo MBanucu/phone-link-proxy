@@ -28,6 +28,8 @@
           # service the live harness reads the screen from and the
           # instrumentation that runs the panel's own checks.
           proxy-apk = app.apk;
+          # The same app as an Android App Bundle for Google Play.
+          proxy-aab = app.aab;
           default = app.apk;
         }
       );
@@ -41,6 +43,10 @@
           # Compiling is a check: a break in src/ fails `nix flake check`
           # instead of waiting for a manual build.
           apk = app.apk;
+
+          # The same for the bundle path: a module that bundletool rejects
+          # fails here, not at the Play upload.
+          aab = app.aab;
 
           # The Android-free logic on a plain JDK: the SOCKS5 protocol, the
           # configuration rules, the state text and the profile document.

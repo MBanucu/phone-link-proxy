@@ -180,15 +180,25 @@ generated dev key.
 ```sh
 PHONE_APP_KEYSTORE=~/keys/phone-link.jks PHONE_APP_KEY_ALIAS=phonelink \
 PHONE_APP_KEYSTORE_PASS=... PHONE_APP_KEY_PASS=... \
-  nix develop -c ./build.sh --release
+  nix develop -c ./build.sh --release --bundle
 ```
 
 The four variables are the keystore (JKS or PKCS12), the alias inside it and the
 two passwords, the key's being optional when it is the store's. They reach
-`apksigner` as `env:` references, so no password appears in a process listing or
-in the log of the job that ran the build. With `PHONE_APP_KEYSTORE` unset, a
-plain `./build.sh` still produces a locally installable APK signed with the dev
-key; that is the only thing the dev key is for.
+`apksigner` (APKs) and `jarsigner` (the AAB) as `env:` references, so no
+password appears in a process listing or in the log of the job that ran the
+build. With `PHONE_APP_KEYSTORE` unset, a plain `./build.sh` still produces a
+locally installable APK signed with the dev key; that is the only thing the dev
+key is for.
+
+`--bundle` links the same compiled resources in aapt2's proto format and lets
+bundletool pack the base module, so the AAB cannot drift from the APK. It is an
+Android App Bundle because Google Play has not accepted an APK for a new app
+since 2021, and its target API level has to be 36 for a new app or an update
+since 2026-08-31. The bundle is signed with jarsigner, not apksigner: Play only
+accepts a JAR signature on an AAB. Upload it in Play Console; Play re-signs the
+generated APKs with the app-signing key, which is why a Play install cannot
+replace the GitHub APK in place.
 
 Generate a release key once and keep it somewhere it cannot be lost — the same
 key is the only way to update an installed app in place, so a lost keystore
@@ -210,7 +220,9 @@ optionally `ANDROID_KEY_PASS`). `ANDROID_CERT_SHA256` is required: it is the
 release certificate's SHA-256 fingerprint, the finished APK must carry it, and
 the workflow refuses to publish if it is unset, if the APK carries the debug
 key, or if the certificate differs. It then attaches
-`phone-link-proxy-<version>.apk` and its `.sha256` to the release for the tag.
+`phone-link-proxy-<version>.apk`, `phone-link-proxy-<version>.aab` and their
+`.sha256` files to the release for the tag; the AAB is the one uploaded to
+Google Play.
 The version in the name is the app's own `version` file, which is the one
 source `build.sh` stamps into the manifest.
 
@@ -474,7 +486,9 @@ action.
 
 `build.sh` writes two APKs of this app: `phone-link-proxy.apk` under
 `org.phonelink.proxy`, and `phone-link-proxy-test.apk` under
-`org.phonelink.proxy.test`, which is the one the live harness installs. They are
+`org.phonelink.proxy.test`, which is the one the live harness installs. With
+`--bundle` it also writes `phone-link-proxy.aab`, the same app packed for
+Google Play. They are
 the same code — one release build and one for testing — and a phone can hold
 both, listening on their own ports with their own stores, so testing a build
 never replaces the proxy the phone lives on. Only the label differs ("Phone link

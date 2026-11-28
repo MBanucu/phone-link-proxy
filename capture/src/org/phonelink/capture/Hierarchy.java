@@ -50,6 +50,10 @@ final class Hierarchy {
         return xml.toString();
     }
 
+    // isChecked() is deprecated in API 36 in favour of the tri-state getChecked(),
+    // but the dump keeps uiautomator's boolean `checked` attribute and minSdk is
+    // 29, so the old call is the one that says what the document needs.
+    @SuppressWarnings("deprecation")
     private static void append(StringBuilder xml, AccessibilityNodeInfo node, int index) {
         Rect bounds = new Rect();
         node.getBoundsInScreen(bounds);

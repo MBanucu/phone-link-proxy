@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-28
+
+### Added
+
+- `build.sh --bundle` writes `build/phone-link-proxy.aab`, the Android App
+  Bundle Google Play requires. It links the same sources and resources in
+  proto format and packs them with bundletool; the bundle is signed with
+  jarsigner because Play does not accept an apksigner signature on an AAB.
+  The release workflow attaches it next to the APK.
+
+### Changed
+
+- The app targets Android 16 (API 36) and is compiled against it, which Google
+  Play requires for a new app or an update since 2026-08-31. The only source
+  change the newer platform needed was suppressing the API 36 deprecation of
+  `AccessibilityNodeInfo.isChecked()` in the test-only capture service; its
+  output is unchanged.
+
 ## [0.15.0] - 2026-11-28
 
 ### Changed
