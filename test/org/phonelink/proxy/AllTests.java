@@ -57,6 +57,7 @@ public final class AllTests {
         suites.add(new Suite("traffic", new String[] {}, TrafficTest::cases));
         suites.add(new Suite("event-log", new String[] {"log"}, EventLogTest::cases));
         suites.add(new Suite("boot-gate", new String[] {"boot"}, BootGateTest::cases));
+        suites.add(new Suite("resume", new String[] {"update"}, ResumePolicyTest::cases));
         suites.add(new Suite("proxy-state", new String[] {"state"}, ProxyStateTest::cases));
         suites.add(new Suite("egress-policy", new String[] {"egress"},
                 EgressPolicyTest::cases));

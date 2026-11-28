@@ -830,6 +830,26 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 `adb logcat -s phone-link-proxy` reports the bound port, refused credentials and
 every CONNECT that had no cellular network to use.
 
+### Coming back after an update
+
+An update is not a reboot, but it has the same two answers. `adb install -r`
+replaces the APK and kills the process, and Android does not reliably restart a
+service that a package replacement stopped, so the app listens for
+`MY_PACKAGE_REPLACED` itself:
+
+- `auto_start` on and a stored port: the receiver starts the listener on that
+  port, with no tap and no extra `am start-foreground-service`. The SSID gate
+  still decides whether the port opens, so on another network the service is up
+  with the port closed, exactly as after a reboot.
+- `auto_start` off: the update leaves it stopped, exactly as a reboot does.
+
+The decision is the same one the boot receiver makes (`ResumePolicy`), and the
+receiver is not exported: only the system's package-replacement broadcast
+reaches it. Nothing about an update shows in `last_boot`; that line stays a
+boot observation. The install scripts need no fallback start — read
+`state.txt`'s `auto_start` and `dumpsys activity service` after the install to
+report the observed state instead of asking for a manual start.
+
 ## Several at once
 
 Every saved proxy carries its own port, credentials and SSID, and the service
@@ -882,7 +902,7 @@ text.
 | `anonymous` (`--ez`) | `false` | listen without authentication |
 | `ssid` (`--es`) | `PhoneLink` | SSID the listener may run on |
 | `any_network` (`--ez`) | `false` | ignore the SSID gate and listen on any connected network; not a transport mode, and still authenticated unless `anonymous` |
-| `auto_start` (`--ez`) | `false` | come back after a reboot and stay up (the SSID still gates the port) |
+| `auto_start` (`--ez`) | `false` | come back after a reboot or an update and stay up (the SSID still gates the port) |
 | `wifi_lock` (`--ez`) | `false` | opt-in experiment: hold a Wi-Fi lock while a Wi-Fi listener is bound; costs battery and does not promise to fix #11 |
 | `adb_wifi` (`--ez`) | `true` | turn wireless debugging back on when the phone joins the SSID (needs `WRITE_SECURE_SETTINGS`) |
 | `profile` (`--es`) | — | the saved configuration to start from; the extras above are applied on top of it |

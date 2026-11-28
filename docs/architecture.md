@@ -90,7 +90,10 @@ means the name is internal.
 | [`UplinkPolicy.java`](../src/org/phonelink/proxy/UplinkPolicy.java) | The SSID gate's rules, with no Android types. | none (static, Android-free) | no |
 | [`WifiLockPolicy.java`](../src/org/phonelink/proxy/WifiLockPolicy.java) | Whether the Wi-Fi lock is wanted for the current listeners. | none (static, Android-free) | no |
 | [`BootGate.java`](../src/org/phonelink/proxy/BootGate.java) | The boot observation lines: the vendor gate is unreadable, a missed boot is dated. | none (static, Android-free) | no |
+| [`ResumePolicy.java`](../src/org/phonelink/proxy/ResumePolicy.java) | Whether a reboot or an update may start the listener without the user. | none (static, Android-free) | no |
+| [`AutoStart.java`](../src/org/phonelink/proxy/AutoStart.java) | The start both restarts make, with the foreground-start fallback. | receivers | no |
 | [`BootReceiver.java`](../src/org/phonelink/proxy/BootReceiver.java) | Notes the boot, then starts the service when `auto_start` is on. | Android (receiver) | yes — receiver |
+| [`UpdateReceiver.java`](../src/org/phonelink/proxy/UpdateReceiver.java) | Starts the service after `MY_PACKAGE_REPLACED` under the same rule. | Android (receiver) | yes — receiver |
 | [`AdbWireless.java`](../src/org/phonelink/proxy/AdbWireless.java) | Turns wireless debugging back on when the configured SSID matches. | none (static) | no |
 | [`TilePlan.java`](../src/org/phonelink/proxy/TilePlan.java) | What one tile click starts and stops, from settings and running state. | none (static, Android-free) | no |
 | [`TileCycle.java`](../src/org/phonelink/proxy/TileCycle.java) | The ordered sets a tile click brings up before "off". | none (static, Android-free) | no |
@@ -112,7 +115,8 @@ manifest that keeps the class package while the application id changes.
 Four callers start `ProxyService` with an action: the panel's Start
 (`MainActivity`), a tile click (`ProxyTile`), `BootReceiver` when `auto_start` is
 set, and `adb shell am start-foreground-service` (the exported, `DUMP`-guarded
-service). The notification's Stop action enters the same `STOP` path. All of
+service). A fifth, `UpdateReceiver`, makes the same start after the package is
+replaced. The notification's Stop action enters the same `STOP` path. All of
 them go through `onStartCommand`; the panel and adb both write through
 `ConfigStore`, so they cannot configure a listener differently.
 

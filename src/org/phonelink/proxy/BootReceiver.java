@@ -3,7 +3,6 @@ package org.phonelink.proxy;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.util.Log;
 
 /**
  * Brings the listener back after a reboot when the user asked for that.
@@ -16,33 +15,18 @@ import android.util.Log;
 public final class BootReceiver extends BroadcastReceiver {
 
     @Override
-    public void onReceive(Context context, Intent intent) {String action = intent.getAction();
-// LOCKED_BOOT_COMPLETED is the one that arrives before the first unlock; on
-// this phone it only does so because DokeOS allowlists the app.
-if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
-&& !Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
-return;
-}
+    public void onReceive(Context context, Intent intent) {
+        String action = intent.getAction();
+        // LOCKED_BOOT_COMPLETED is the one that arrives before the first
+        // unlock; on this phone it only does so because DokeOS allowlists the
+        // app.
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
+                && !Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) {
+            return;
+        }
         // Before the auto-start check: that this broadcast arrived is the fact
         // the DokeOS gate is judged by, whether or not a listener should start.
         ConfigStore.noteBoot(context);
-        if (!ConfigStore.autoStart(context)) {
-            return;
-        }
-        Intent start = new Intent(context, ProxyService.class).setAction(ProxyService.ACTION_START);
-        try {
-            context.startForegroundService(start);
-        } catch (IllegalStateException e) {
-            // Android 15 refuses some foreground starts after BOOT_COMPLETED.
-            // A plain start rides the receiver's temporary allowlist instead;
-            // the service promotes itself in onStartCommand, and stops itself
-            // if that is refused too.
-            Log.w(ProxyService.TAG, "no foreground start after boot, trying a plain start", e);
-            try {
-                context.startService(start);
-            } catch (IllegalStateException again) {
-                Log.w(ProxyService.TAG, "cannot start after boot", again);
-            }
-        }
+        AutoStart.resume(context);
     }
 }

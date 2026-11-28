@@ -106,10 +106,10 @@ final class ConfigStore {
     }
 
     /**
-     * Whether the service should come back by itself after a reboot, so the
-     * SSID gate opens the port when the phone reaches the AP without anybody
-     * touching the tile. Not part of {@link ProxyConfig}: it says what should
-     * happen to the service, not what the listener is.
+     * Whether the service should come back by itself after a reboot or an app
+     * update, so the SSID gate opens the port when the phone reaches the AP
+     * without anybody touching the tile. Not part of {@link ProxyConfig}: it
+     * says what should happen to the service, not what the listener is.
      */
     static boolean autoStart(Context context) {
         return prefs(context).getBoolean(KEY_AUTO_START, false);

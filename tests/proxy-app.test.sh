@@ -52,6 +52,7 @@ sources=(
   "$ROOT/src/org/phonelink/proxy/Upstream.java"
   "$ROOT/src/org/phonelink/proxy/Actions.java"
   "$ROOT/src/org/phonelink/proxy/BootGate.java"
+  "$ROOT/src/org/phonelink/proxy/ResumePolicy.java"
   "$ROOT/src/org/phonelink/proxy/Closeables.java"
   "$ROOT/src/org/phonelink/proxy/EgressPolicy.java"
   "$ROOT/src/org/phonelink/proxy/EgressState.java"
@@ -139,6 +140,11 @@ ui_assert "$strings" 'The battery gate blocks the restart after a reboot' \
   "the header mark no longer says it is the battery gate"
 ui_assert "$layout" 'android:id="@+id/oem_autostart"' \
   "the panel layout has no OEM autostart line"
+manifest=$ROOT/AndroidManifest.xml
+ui_assert "$manifest" 'android:name="org.phonelink.proxy.UpdateReceiver"' \
+  "the manifest has no update receiver"
+ui_assert "$manifest" 'android.intent.action.MY_PACKAGE_REPLACED' \
+  "the update receiver does not listen for the package-replacement broadcast"
 [ -n "$status" ] || status=1
 if [ "$status" -ne 0 ]; then
   exit "$status"
