@@ -3,7 +3,12 @@
 # the configuration rules and the state text. Plain JDK, no phone, no Android
 # SDK and no network.
 #
-#   bash tests/proxy-app.test.sh
+#   bash tests/proxy-app.test.sh                 # every suite
+#   bash tests/proxy-app.test.sh --only udp      # one area
+#   bash tests/proxy-app.test.sh --only 'socks5-*'  # a glob, or a,b for two
+#
+# The suites live one per area under test/org/phonelink/proxy/ and share
+# TestSupport; AllTests names them and runs the selected ones.
 #
 # These classes are compiled without android.jar, which is only possible because
 # they carry no Android types: the logging and the upstream connection are
@@ -21,6 +26,26 @@ for tool in "$JAVAC" "$JAVA"; do
     printf 'missing %s: run this in nix develop .#android, or install a JDK\n' "$tool" >&2
     exit 2
   fi
+done
+
+usage() {
+  printf 'usage: bash tests/proxy-app.test.sh [--only <suite>[,<suite>...]]\n' >&2
+  printf '  a suite is an id or alias; * and ? are globs\n' >&2
+  exit 2
+}
+
+only=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --only)
+      [ $# -ge 2 ] || usage
+      only=(--only "$2")
+      shift 2
+      ;;
+    *)
+      usage
+      ;;
+  esac
 done
 
 sources=(
@@ -44,15 +69,19 @@ sources=(
   "$ROOT/src/org/phonelink/proxy/ProfileTransfer.java"
   "$ROOT/src/org/phonelink/proxy/TransferGate.java"
   "$ROOT/src/org/phonelink/proxy/UplinkPolicy.java"
-  "$ROOT/test/org/phonelink/proxy/ProxyAppTest.java"
 )
+
+# Every suite is compiled, including the ones --only does not run, so a broken
+# file is a compile error and not a silent skip.
+mapfile -t tests < <(find "$ROOT/test" -name '*.java' -print | sort)
 
 # The compile is a part of this suite's time worth naming: it is one javac
 # over the Android-free sources, and when the whole check gets slower it
 # matters whether that or the cases did. PHONE_TEST_TIMINGS=<file> gets
 # `part,ms` rows the flake's script check folds into its timings.csv.
 started=$(date +%s%N)
-if ! "$JAVAC" -encoding UTF-8 -d "$TMP/classes" "${sources[@]}"; then
+if ! "$JAVAC" -encoding UTF-8 -Xlint:all -Werror -d "$TMP/classes" \
+    "${sources[@]}" "${tests[@]}"; then
   printf '\n0 passed, 1 failed\n'
   exit 1
 fi
@@ -66,7 +95,11 @@ part_timing() { # part_timing PART START END
 }
 part_timing javac "$started" "$compiled"
 
-"$JAVA" -cp "$TMP/classes" org.phonelink.proxy.ProxyAppTest
+if [ ${#only[@]} -gt 0 ]; then
+  "$JAVA" -cp "$TMP/classes" org.phonelink.proxy.AllTests "${only[@]}"
+else
+  "$JAVA" -cp "$TMP/classes" org.phonelink.proxy.AllTests
+fi
 status=$?
 part_timing cases "$compiled" "$(date +%s%N)"
 
