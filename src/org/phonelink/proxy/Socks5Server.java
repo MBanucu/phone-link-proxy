@@ -5,15 +5,16 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,19 +25,33 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>{@code CONNECT} (TCP) and {@code UDP ASSOCIATE} are implemented;
  * {@code BIND} is refused with {@code command not supported}. The handshake is
- * {@link Handshake}, the TCP tunnel {@link TcpRelay}, the UDP relay
- * {@link UdpAssociation} and the framing {@link Socks5Request}/{@link UdpPacket};
- * this class admits and counts clients, tracks what a stop must end, and closes
- * it. It listens on the wildcard address, so the port is the same on the hotspot
- * ({@code ap0}), USB tether ({@code rndis0}) and the AP link ({@code wlan0}).
+ * {@link Handshake}, the TCP tunnel {@link TcpRelay} plus {@link ChannelRelay},
+ * the UDP relay {@link UdpAssociation} and the framing
+ * {@link Socks5Request}/{@link UdpPacket}; this class admits and counts clients,
+ * tracks what a stop must end, and closes it. It listens on the wildcard
+ * address, so the port is the same on the hotspot ({@code ap0}), USB tether
+ * ({@code rndis0}) and the AP link ({@code wlan0}).
+ *
+ * <p>The handshake runs in a small, bounded handler pool. After the CONNECT
+ * reply the two channels are handed to a fixed pool of selector threads, so a
+ * live tunnel costs no thread. {@code max_connections} still bounds how many
+ * clients may be admitted at once and a client beyond it is reset at once.
  *
  * <p>Deliberately free of Android types: the logger and the upstream are seams,
  * so this class and its tests run on a plain JDK.
  */
 final class Socks5Server implements Closeable,
-        TcpRelay.Pumps, TcpRelay.Sockets, UdpAssociation.Registry {
+        ChannelRelay.Sockets, UdpAssociation.Registry {
 
     private static final int HANDSHAKE_TIMEOUT_MS = 30_000;
+
+    /**
+     * Handlers that may be inside a greeting, auth or request at once. The
+     * stage is short and bounded by the handshake timeout, so a small fixed
+     * pool is enough; a burst waits in the admission queue rather than
+     * creating a thread per client.
+     */
+    static final int HANDSHAKE_THREADS = 32;
 
     /** A SOCKS5 UDP datagram, header included, may not exceed this. */
     static final int UDP_MAX_DATAGRAM = 64 * 1024;
@@ -47,11 +62,11 @@ final class Socks5Server implements Closeable,
 
     /**
      * The default ceiling: how many connections are served at once when nothing
-     * else says otherwise. It is a setting now ({@code max_connections}, 16..1024
+     * else says otherwise. It is a setting ({@code max_connections}, 16..1024
      * in {@link ProxyConfig}), so a listener can fit a desktop's flow count
      * without a rebuild; this constant is what the convenience constructor and
-     * the tests use. Each live connection costs two threads, so the ceiling
-     * stays bounded on purpose; a selector-based relay is issue #37.
+     * the tests use. A live CONNECT costs no thread now that the relay is a
+     * selector, so the ceiling is bounded by file descriptors and memory.
      */
     static final int MAX_CONNECTIONS = 256;
     /** How long the other direction may keep draining after one direction ends. */
@@ -82,26 +97,26 @@ final class Socks5Server implements Closeable,
     private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
     /** Live UDP associations, so a stop ends them and frees their sockets. */
     private final Set<UdpAssociation> associations = ConcurrentHashMap.newKeySet();
-    /** Relay threads in flight; close() interrupts them as well as their sockets. */
-    private final Set<Thread> pumps = ConcurrentHashMap.newKeySet();
     /** Guards close() and what is admitted after it. */
     private final Object lifecycle = new Object();
-    /** One handler per live connection; no queue, so saturation is refused at once. */
+    /** The short blocking handshake; no queue beyond the admission ceiling. */
     private final ThreadPoolExecutor handlers;
     /** One shared thread that closes a half-closed relay after its linger. */
     private final ScheduledThreadPoolExecutor linger;
-    private final TcpRelay relay;
+    /** The fixed selector pool every established CONNECT is handed to. */
+    private final ChannelRelay relay;
+    private final TcpRelay tcpRelay;
     private final UdpAssociation.Settings udpSettings;
     private final int maxConnections;
-    private volatile ServerSocket server;
+    private volatile ServerSocketChannel server;
     private volatile boolean running;
     /** Guarded by {@link #lifecycle}: close() has already run. */
     private boolean closed;
 
     /** the bound port, or 0 when the server is not listening */
     int port() {
-        ServerSocket socket = server;
-        return socket == null ? 0 : socket.getLocalPort();
+        ServerSocketChannel socket = server;
+        return socket == null ? 0 : socket.socket().getLocalPort();
     }
 
     Socks5Server(
@@ -163,12 +178,13 @@ final class Socks5Server implements Closeable,
         this.logger = logger;
         this.maxConnections = maxConnections;
         this.udpSettings = new UdpAssociation.Settings(udpMaxDatagram, udpQueue, udpIdleMs);
+        int handshakeThreads = Math.min(HANDSHAKE_THREADS, maxConnections);
         handlers = new ThreadPoolExecutor(
-                maxConnections, maxConnections,
+                handshakeThreads, handshakeThreads,
                 HANDLER_KEEPALIVE_SECONDS, TimeUnit.SECONDS,
-                // No queue: an accepted client either gets a handler now or is
-                // refused, never parked until a slot happens to free up.
-                new SynchronousQueue<>(),
+                // A burst waits here, bounded by the admission ceiling; a
+                // client over the ceiling never reaches the queue at all.
+                new ArrayBlockingQueue<>(maxConnections),
                 runnable -> {
                     Thread thread = new Thread(runnable, "socks5-handler");
                     thread.setDaemon(true);
@@ -183,7 +199,9 @@ final class Socks5Server implements Closeable,
         // A cancelled linger is a relay that finished on its own; drop its
         // socket references now instead of leaving them queued for the delay.
         linger.setRemoveOnCancelPolicy(true);
-        relay = new TcpRelay(upstream, this.traffic, linger, relayLingerMs, this, this, logger);
+        relay = new ChannelRelay(
+                this.traffic, linger, relayLingerMs, this, logger, ChannelRelay.THREADS);
+        tcpRelay = new TcpRelay(upstream, relay, this, logger);
     }
 
     private void log(String message) {
@@ -194,9 +212,9 @@ final class Socks5Server implements Closeable,
 
     /** Bind and start accepting. Throws if the port is taken. */
     void start() throws IOException {
-        ServerSocket socket = new ServerSocket();
+        ServerSocketChannel socket = ServerSocketChannel.open();
         try {
-            socket.setReuseAddress(true);
+            socket.socket().setReuseAddress(true);
             socket.bind(new InetSocketAddress(port), Math.max(50, maxConnections));
         } catch (IOException e) {
             // A failed bind is not a reason to leak the descriptor.
@@ -211,6 +229,16 @@ final class Socks5Server implements Closeable,
             server = socket;
             running = true;
         }
+        try {
+            relay.start();
+        } catch (IOException e) {
+            synchronized (lifecycle) {
+                server = null;
+                running = false;
+            }
+            Closeables.closeQuietly(socket);
+            throw e;
+        }
         Thread acceptor = new Thread(this::acceptLoop, "socks5-accept");
         acceptor.setDaemon(true);
         acceptor.start();
@@ -218,7 +246,7 @@ final class Socks5Server implements Closeable,
 
     private void acceptLoop() {
         while (true) {
-            ServerSocket listening;
+            ServerSocketChannel listening;
             synchronized (lifecycle) {
                 if (closed || !running) {
                     return;
@@ -229,7 +257,7 @@ final class Socks5Server implements Closeable,
             if (listening == null) {
                 return;
             }
-            Socket client;
+            SocketChannel client;
             try {
                 client = listening.accept();
             } catch (IOException e) {
@@ -245,17 +273,27 @@ final class Socks5Server implements Closeable,
                 }
                 return;
             }
-            if (!track(client)) {
-                Closeables.resetQuietly(client);
+            if (!track(client.socket())) {
+                Closeables.resetQuietly(client.socket());
                 return;
             }
+            int count = clients.incrementAndGet();
+            if (count > maxConnections) {
+                clients.decrementAndGet();
+                untrack(client.socket());
+                Closeables.resetQuietly(client.socket());
+                log("refused a client: " + maxConnections + " connections already in use");
+                continue;
+            }
+            listener.onClientsChanged(count);
             try {
                 handlers.execute(() -> handle(client));
             } catch (RejectedExecutionException e) {
                 // Bounded on purpose: refusing a client beats exhausting the
                 // process with threads a LAN client asked for.
-                untrack(client);
-                Closeables.resetQuietly(client);
+                untrack(client.socket());
+                Closeables.resetQuietly(client.socket());
+                listener.onClientsChanged(clients.decrementAndGet());
                 log("refused a client: " + maxConnections + " connections already in use");
             }
         }
@@ -278,20 +316,10 @@ final class Socks5Server implements Closeable,
         sockets.remove(socket);
     }
 
+    /** A CONNECT tunnel ended: its client leaves the count with its sockets. */
     @Override
-    public boolean admit(Thread pump) {
-        synchronized (lifecycle) {
-            if (closed) {
-                return false;
-            }
-            pumps.add(pump);
-            return true;
-        }
-    }
-
-    @Override
-    public void release(Thread pump) {
-        pumps.remove(pump);
+    public void relayEnded() {
+        listener.onClientsChanged(clients.decrementAndGet());
     }
 
     @Override
@@ -310,17 +338,9 @@ final class Socks5Server implements Closeable,
         associations.remove(association);
     }
 
-    private void handle(Socket client) {
-        int count;
-        synchronized (lifecycle) {
-            if (closed) {
-                sockets.remove(client);
-                Closeables.resetQuietly(client);
-                return;
-            }
-            count = clients.incrementAndGet();
-        }
-        listener.onClientsChanged(count);
+    private void handle(SocketChannel channel) {
+        Socket client = channel.socket();
+        boolean ownedByRelay = false;
         try {
             client.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
             client.setTcpNoDelay(true);
@@ -336,7 +356,7 @@ final class Socks5Server implements Closeable,
                 return;
             }
             if (request.command == Handshake.COMMAND_CONNECT) {
-                relay.serve(client, out, request);
+                ownedByRelay = tcpRelay.serve(channel, out, request);
             } else if (request.command == Handshake.COMMAND_UDP_ASSOCIATE) {
                 UdpAssociation.serve(upstream, client, out, request, udpSettings, logger, this);
             } else {
@@ -345,9 +365,11 @@ final class Socks5Server implements Closeable,
         } catch (IOException e) {
             log("connection ended: " + e.getMessage());
         } finally {
-            untrack(client);
-            Closeables.closeBoundedQuietly(client);
-            listener.onClientsChanged(clients.decrementAndGet());
+            if (!ownedByRelay) {
+                untrack(client);
+                Closeables.closeBoundedQuietly(client);
+                listener.onClientsChanged(clients.decrementAndGet());
+            }
         }
     }
 
@@ -356,15 +378,14 @@ final class Socks5Server implements Closeable,
      *
      * <p>Idempotent: the second call finds the listening socket gone and does
      * nothing. The accepted and upstream sockets are closed first, which
-     * unblocks the relay reads, and the pump threads are interrupted as a
-     * second way out for anything not blocked on a socket.
+     * unblocks the relay reads; the selector pool is then told to stop, and
+     * the handshake threads are interrupted as well as their sockets closed.
      */
     @Override
     public void close() {
-        ServerSocket listening;
+        ServerSocketChannel listening;
         List<Socket> tunnels;
         List<UdpAssociation> udp;
-        List<Thread> relays;
         synchronized (lifecycle) {
             if (closed) {
                 return;
@@ -377,8 +398,6 @@ final class Socks5Server implements Closeable,
             sockets.clear();
             udp = new ArrayList<>(associations);
             associations.clear();
-            relays = new ArrayList<>(pumps);
-            pumps.clear();
         }
         Closeables.closeQuietly(listening);
         for (UdpAssociation association : udp) {
@@ -387,9 +406,7 @@ final class Socks5Server implements Closeable,
         for (Socket socket : tunnels) {
             Closeables.resetQuietly(socket);
         }
-        for (Thread relay : relays) {
-            relay.interrupt();
-        }
+        relay.close();
         handlers.shutdownNow();
         linger.shutdownNow();
     }

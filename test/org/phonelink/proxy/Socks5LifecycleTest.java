@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -91,6 +92,61 @@ public final class Socks5LifecycleTest {
                     }
                 }
                 assertEqual(0, waitForClients(fixture.clients), "clients after the burst");
+            }
+        });
+
+        run("32 parallel tunnels relay 128 KiB each without loss", () -> {
+            int flows = 32;
+            int size = 128 * 1024;
+            try (Fixture fixture = new Fixture()) {
+                List<Socket> sockets = new ArrayList<>();
+                try {
+                    for (int index = 0; index < flows; index++) {
+                        Socket socket = fixture.open();
+                        sockets.add(socket);
+                        connect(socket);
+                    }
+                    List<Thread> workers = new ArrayList<>();
+                    java.util.concurrent.atomic.AtomicReference<Throwable> failure =
+                            new java.util.concurrent.atomic.AtomicReference<>();
+                    for (int index = 0; index < flows; index++) {
+                        Socket socket = sockets.get(index);
+                        int id = index;
+                        Thread worker = new Thread(() -> {
+                            try {
+                                byte[] payload = new byte[size];
+                                for (int at = 0; at < size; at++) {
+                                    payload[at] = (byte) (id * 31 + at);
+                                }
+                                socket.getOutputStream().write(payload);
+                                socket.getOutputStream().flush();
+                                byte[] echoed = readFully(socket.getInputStream(), size);
+                                if (!java.util.Arrays.equals(payload, echoed)) {
+                                    throw new AssertionError("flow " + id + " lost bytes");
+                                }
+                                socket.shutdownOutput();
+                                assertClosed(socket, "flow " + id + " after half close");
+                            } catch (Throwable e) {
+                                failure.compareAndSet(null, e);
+                            }
+                        }, "payload-flow-" + index);
+                        worker.setDaemon(true);
+                        workers.add(worker);
+                        worker.start();
+                    }
+                    for (Thread worker : workers) {
+                        worker.join(TIMEOUT_MS * 3);
+                        assertTrue(!worker.isAlive(), "a payload flow did not finish");
+                    }
+                    if (failure.get() != null) {
+                        throw new AssertionError("a payload flow failed", failure.get());
+                    }
+                } finally {
+                    for (Socket socket : sockets) {
+                        Closeables.closeQuietly(socket);
+                    }
+                }
+                assertEqual(0, waitForClients(fixture.clients), "clients after the payload");
             }
         });
 
@@ -230,11 +286,99 @@ public final class Socks5LifecycleTest {
             }
         });
 
+        run("a half-closed client still receives the origin's answer within the linger", () -> {
+            try (AnswerAfterEofUpstream upstream =
+                            new AnswerAfterEofUpstream(
+                                    "pong".getBytes(StandardCharsets.US_ASCII), 100);
+                    Fixture fixture = new Fixture(USER, PASSWORD, upstream,
+                            Socks5Server.MAX_CONNECTIONS, 2_000);
+                    Socket socket = fixture.open()) {
+                connect(socket);
+                socket.getOutputStream().write("ping".getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+                socket.shutdownOutput();
+                assertEqual("pong", new String(readFully(socket.getInputStream(), 4),
+                        StandardCharsets.US_ASCII), "answer after the half close");
+                assertClosed(socket, "the tunnel after the answer");
+                assertEqual(0, waitForClients(fixture.clients), "clients after the answer");
+            }
+        });
+
+        run("traffic counters see both directions of a tunnel", () -> {
+            int bytes = 1234;
+            try (Fixture fixture = new Fixture(); Socket socket = fixture.open()) {
+                connect(socket);
+                byte[] payload = new byte[bytes];
+                for (int index = 0; index < bytes; index++) {
+                    payload[index] = (byte) index;
+                }
+                socket.getOutputStream().write(payload);
+                socket.getOutputStream().flush();
+                byte[] echoed = readFully(socket.getInputStream(), bytes);
+                assertTrue(java.util.Arrays.equals(payload, echoed), "echoed bytes differ");
+
+                long deadline = System.currentTimeMillis() + TIMEOUT_MS;
+                long[] totals;
+                while (System.currentTimeMillis() < deadline) {
+                    totals = fixture.traffic.totals();
+                    if (totals[0] >= bytes && totals[1] >= bytes) {
+                        break;
+                    }
+                    Thread.sleep(20);
+                }
+                totals = fixture.traffic.totals();
+                assertEqual(bytes, (int) totals[0], "uploaded bytes");
+                assertEqual(bytes, (int) totals[1], "downloaded bytes");
+            }
+        });
+
+        // The old relay spent two threads per live CONNECT, so a thousand
+        // idle flows were ~2000 threads. The selector pool must hold them in
+        // a fixed handful, and close() must end every one of them.
+        run("1000 idle tunnels are held by a fixed relay pool and ended by close", () -> {
+            int count = 1_000;
+            assertEqual(0, waitForThreads("socks5-relay", 0), "relay threads before the test");
+            try (HoldingUpstream upstream = new HoldingUpstream();
+                    Fixture fixture = new Fixture(USER, PASSWORD, upstream, 1_024,
+                            Socks5Server.RELAY_LINGER_MS)) {
+                List<Socket> sockets = new ArrayList<>(count);
+                try {
+                    for (int index = 0; index < count; index++) {
+                        Socket socket = fixture.open();
+                        sockets.add(socket);
+                        connect(socket);
+                    }
+                    assertEqual(count, fixture.clients.get(), "connected clients");
+                    assertEqual(ChannelRelay.THREADS, threadsNamed("socks5-relay"),
+                            "relay threads for 1000 idle tunnels");
+                    int proxyThreads = threadsWithPrefix("socks5-");
+                    assertTrue(proxyThreads <= Socks5Server.HANDSHAKE_THREADS
+                                    + ChannelRelay.THREADS + 2,
+                            "the proxy holds " + proxyThreads + " threads for 1000 tunnels");
+
+                    fixture.server.close();
+                    for (int index = 0; index < count; index++) {
+                        assertClosed(sockets.get(index), "tunnel " + index + " after stop");
+                    }
+                    assertEqual(0, waitForClients(fixture.clients), "clients after stop");
+                    assertEqual(0, waitForThreads("socks5-relay", 0),
+                            "relay threads after stop");
+                    fixture.server.close();
+                } finally {
+                    for (Socket socket : sockets) {
+                        Closeables.closeQuietly(socket);
+                    }
+                }
+            }
+        });
+
         run("a non-SOCKS greeting closes the connection", () -> {
             try (Fixture fixture = new Fixture(); Socket socket = fixture.open()) {
                 socket.getOutputStream().write(new byte[] {0x04, 0x01, 0x00});
                 socket.getOutputStream().flush();
-                assertEqual(-1, socket.getInputStream().read(), "connection closed");
+                // A reset is a close too; the client wrote bytes the server
+                // deliberately did not read.
+                assertClosed(socket, "connection closed");
             }
         });
     }

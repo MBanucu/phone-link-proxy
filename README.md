@@ -238,7 +238,9 @@ first and takes the app's saved proxies with it.
   method negotiation, both credential failures, unauthenticated mode, CONNECT
   for IPv4 and for a domain name, relaying 32 KiB, half-close, 60 concurrent
   connections, the count returning to the live flows, a half-closed relay
-  released after its linger, saturation refused instead of queued, a refused
+  released after its linger, an answer delivered after the client half-closes,
+  both traffic counters, 1000 idle tunnels held by the fixed relay pool and
+  ended by close, saturation refused instead of queued, a refused
   command, an unknown address type, an upstream failure reply, client counting,
   a non-SOCKS greeting; UDP ASSOCIATE's request/reply framing for IPv4, IPv6
   and domain names, a real UDP echo through an association, fragments and
@@ -256,6 +258,11 @@ first and takes the app's saved proxies with it.
   why the code has a `Logger` seam, an `Upstream` interface and a config/state
   split instead of `Log.i`, `Egress` and string building inside the service —
   and why the `unit` check carries a JDK.
+- `tests/relay-bench.sh` — loopback throughput for the CONNECT relay, for a
+  before/after comparison: down and up, one and four parallel flows, a fixed
+  MiB per scenario, and a small warmup run. It is a measurement, not a gate,
+  and it is not part of `nix flake check`; the number says whether the selector
+  changed the byte pump, not what the phone's cellular link does.
 - `tests/live/proxy-app.sh` — the steps and the claims, with
   `tests/live/phone.sh` beside it holding how to look at and drive the phone
   (captures, gestures, sequences, the panel's navigation, unlock and settings),
@@ -497,11 +504,10 @@ password; the panel's Start also re-reads the fields, so changing them and
 pressing Start restarts the listener with the new settings.
 
 `max_connections` is how many SOCKS connections the listener may hold at once
-(16..1024, 256 by default). Each live connection costs two threads, so raising
-it is how a desktop browser with a hundred keep-alive flows is served instead of
-being refused; the panel's `Max connections` field writes the same key as
-`--ei max_connections N`. The selector-based relay that removes the thread cost
-is #37.
+(16..1024, 256 by default). An established CONNECT costs no thread — the relay
+is a fixed selector pool — so raising it is how a desktop browser with a
+hundred keep-alive flows is served instead of being refused; the panel's
+`Max connections` field writes the same key as `--ei max_connections N`.
 
 The same two actions are on a Quick Settings tile: tapping "Phone link proxy"
 starts and stops the proxies the tile is for, and the subtitle says what is

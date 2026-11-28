@@ -2,7 +2,7 @@ package org.phonelink.proxy;
 
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.Socket;
+import java.nio.channels.SocketChannel;
 
 /**
  * Where a CONNECT and a UDP association go.
@@ -10,10 +10,14 @@ import java.net.Socket;
  * <p>Implemented by {@link Egress} on the phone and by the hermetic tests on the
  * JVM, which is why this interface carries no Android types: the protocol code
  * can then be compiled and exercised with a plain JDK.
+ *
+ * <p>A CONNECT is a {@link SocketChannel} because {@link ChannelRelay} selects
+ * on it after the handshake. It is still opened in blocking mode here; the
+ * caller switches it to non-blocking once the SOCKS reply has been written.
  */
 interface Upstream {
 
-    Socket connect(String host, int port, int timeoutMs) throws Failure;
+    SocketChannel connect(String host, int port, int timeoutMs) throws Failure;
 
     /**
      * A datagram socket bound to the same cellular egress a CONNECT would use.

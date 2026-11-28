@@ -17,9 +17,9 @@ import java.net.ConnectException;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.nio.channels.SocketChannel;
 import java.util.Collections;
 
 /**
@@ -237,7 +237,7 @@ final class Egress implements Upstream, Closeable {
      * left; the first one that connects wins.
      */
     @Override
-    public Socket connect(String host, int port, int timeoutMs) throws Failure {
+    public SocketChannel connect(String host, int port, int timeoutMs) throws Failure {
         Network network = requireCellular(host + ":" + port);
 
         long deadline = SystemClock.elapsedRealtime() + timeoutMs;
@@ -259,15 +259,20 @@ final class Egress implements Upstream, Closeable {
                 }
                 break;
             }
-            Socket socket = null;
+            SocketChannel channel = null;
             try {
-                socket = network.getSocketFactory().createSocket();
-                socket.connect(new InetSocketAddress(address, port), (int) left);
-                socket.setTcpNoDelay(true);
-                return socket;
+                // A channel is what the relay selects on after the handshake.
+                // Bind the unconnected channel to the cellular network, then
+                // connect through the same Socket adaptor (and its timeout)
+                // that the socket factory used before.
+                channel = SocketChannel.open();
+                network.bindSocket(channel.socket());
+                channel.socket().connect(new InetSocketAddress(address, port), (int) left);
+                channel.socket().setTcpNoDelay(true);
+                return channel;
             } catch (IOException e) {
                 last = e;
-                Closeables.closeQuietly(socket);
+                Closeables.closeQuietly(channel);
             }
         }
         throw new Upstream.Failure(replyFor(last),

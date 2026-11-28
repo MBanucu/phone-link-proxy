@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -172,6 +173,36 @@ public final class TestSupport {
             Thread.sleep(20);
         }
         return clients.get();
+    }
+
+    /** How many live threads carry exactly this name. */
+    static int threadsNamed(String name) {
+        return threadsMatching(name, false);
+    }
+
+    /** How many live threads have this name prefix. */
+    static int threadsWithPrefix(String prefix) {
+        return threadsMatching(prefix, true);
+    }
+
+    private static int threadsMatching(String name, boolean prefix) {
+        int count = 0;
+        for (Thread thread : Thread.getAllStackTraces().keySet()) {
+            String actual = thread.getName();
+            if ((prefix ? actual.startsWith(name) : actual.equals(name)) && thread.isAlive()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** The count a named thread set settles on, or the last one seen. */
+    static int waitForThreads(String name, int expected) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + TIMEOUT_MS;
+        while (threadsNamed(name) != expected && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        return threadsNamed(name);
     }
 
     static void assertRejected(String what, Runnable action) {
@@ -495,14 +526,16 @@ public final class TestSupport {
         }
 
         @Override
-        public Socket connect(String host, int port, int timeoutMs) throws Failure {
+        public SocketChannel connect(String host, int port, int timeoutMs) throws Failure {
             this.host = host;
             this.port = port;
             this.timeoutMs = timeoutMs;
             try {
-                Socket socket = new Socket("127.0.0.1", backend.getLocalPort());
-                socket.setTcpNoDelay(true);
-                return socket;
+                SocketChannel channel = SocketChannel.open();
+                channel.socket().connect(
+                        new InetSocketAddress("127.0.0.1", backend.getLocalPort()), timeoutMs);
+                channel.socket().setTcpNoDelay(true);
+                return channel;
             } catch (IOException e) {
                 throw new Failure(Handshake.REPLY_CONNECTION_REFUSED, e.getMessage());
             }
@@ -558,7 +591,7 @@ public final class TestSupport {
         }
 
         @Override
-        public Socket connect(String host, int port, int timeoutMs) throws Failure {
+        public SocketChannel connect(String host, int port, int timeoutMs) throws Failure {
             int attempt = attempts.incrementAndGet();
             if (attempt <= failures) {
                 throw new Failure(reply, "attempt " + attempt + " failed with reply " + reply);
@@ -612,13 +645,13 @@ public final class TestSupport {
         }
 
         @Override
-        public Socket connect(String host, int port, int timeoutMs) throws Failure {
+        public SocketChannel connect(String host, int port, int timeoutMs) throws Failure {
             try {
-                Socket socket = new Socket();
-                socket.connect(new InetSocketAddress("127.0.0.1", backend.getLocalPort()),
-                        timeoutMs);
-                socket.setTcpNoDelay(true);
-                return socket;
+                SocketChannel channel = SocketChannel.open();
+                channel.socket().connect(
+                        new InetSocketAddress("127.0.0.1", backend.getLocalPort()), timeoutMs);
+                channel.socket().setTcpNoDelay(true);
+                return channel;
             } catch (IOException e) {
                 throw new Failure(Handshake.REPLY_CONNECTION_REFUSED, e.getMessage());
             }
@@ -633,6 +666,73 @@ public final class TestSupport {
                 }
                 held.clear();
             }
+        }
+    }
+
+    /**
+     * An origin that reads until the client half-closes, waits, then answers
+     * once and closes. The answer can only arrive while the relay's linger is
+     * holding the other direction open.
+     */
+    static final class AnswerAfterEofUpstream implements Upstream, AutoCloseable {
+        private final ServerSocket backend;
+        private final Thread thread;
+        private final byte[] answer;
+        private final long delayMs;
+
+        AnswerAfterEofUpstream(byte[] answer, long delayMs) throws IOException {
+            this.answer = answer.clone();
+            this.delayMs = delayMs;
+            backend = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
+            thread = new Thread(this::serve, "answer-after-eof");
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        private void serve() {
+            while (!backend.isClosed()) {
+                try {
+                    Socket socket = backend.accept();
+                    Thread worker = new Thread(() -> answer(socket), "answer-after-eof-connection");
+                    worker.setDaemon(true);
+                    worker.start();
+                } catch (IOException e) {
+                    return;
+                }
+            }
+        }
+
+        private void answer(Socket socket) {
+            try (Socket open = socket) {
+                byte[] discard = new byte[1024];
+                while (open.getInputStream().read(discard) != -1) {
+                    // Wait for the half-close the relay forwards.
+                }
+                Thread.sleep(delayMs);
+                open.getOutputStream().write(answer);
+                open.getOutputStream().flush();
+                open.shutdownOutput();
+            } catch (IOException | InterruptedException ignored) {
+                // The test closed its end first; that ends this origin.
+            }
+        }
+
+        @Override
+        public SocketChannel connect(String host, int port, int timeoutMs) throws Failure {
+            try {
+                SocketChannel channel = SocketChannel.open();
+                channel.socket().connect(
+                        new InetSocketAddress("127.0.0.1", backend.getLocalPort()), timeoutMs);
+                channel.socket().setTcpNoDelay(true);
+                return channel;
+            } catch (IOException e) {
+                throw new Failure(Handshake.REPLY_CONNECTION_REFUSED, e.getMessage());
+            }
+        }
+
+        @Override
+        public void close() {
+            Closeables.closeQuietly(backend);
         }
     }
 
