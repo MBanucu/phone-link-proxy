@@ -69,7 +69,6 @@
     <string name="error_profile_name">no profile name given: use --es profile NAME</string>
     <string name="error_profile_missing">no saved configuration called \"%1$s\"</string>
     <string name="error_profile_exists">a configuration called \"%1$s\" already exists</string>
-    <string name="error_transfer_extras">export/import needs --ei port N --es token TOKEN (the transfer port, not the proxy\'s)</string>
     <string name="error_transfer_locked">the screen is off or the phone is locked: unlock it, turn the screen on and run the export or import again</string>
     <string name="error_transfer_busy">another export or import is already running</string>
     <string name="error_transfer_failed">the phone could not start the export or import</string>

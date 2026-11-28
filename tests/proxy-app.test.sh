@@ -50,6 +50,7 @@ done
 
 sources=(
   "$ROOT/src/org/phonelink/proxy/Upstream.java"
+  "$ROOT/src/org/phonelink/proxy/Actions.java"
   "$ROOT/src/org/phonelink/proxy/BootGate.java"
   "$ROOT/src/org/phonelink/proxy/Closeables.java"
   "$ROOT/src/org/phonelink/proxy/EgressPolicy.java"
@@ -102,9 +103,9 @@ part_timing() { # part_timing PART START END
 part_timing javac "$started" "$compiled"
 
 if [ ${#only[@]} -gt 0 ]; then
-  "$JAVA" -cp "$TMP/classes" org.phonelink.proxy.AllTests "${only[@]}"
+  "$JAVA" -Dphone.repo="$ROOT" -cp "$TMP/classes" org.phonelink.proxy.AllTests "${only[@]}"
 else
-  "$JAVA" -cp "$TMP/classes" org.phonelink.proxy.AllTests
+  "$JAVA" -Dphone.repo="$ROOT" -cp "$TMP/classes" org.phonelink.proxy.AllTests
 fi
 status=$?
 part_timing cases "$compiled" "$(date +%s%N)"
