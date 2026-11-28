@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-28
+
+### Added
+
+- The app speaks `contract_version 1` and describes its seven adb actions from
+  one table (`Actions`). Dispatch, the `Help` action section, the `dumpsys`
+  action list and the README's table are generated from that table, so an
+  action or extra cannot drift between them; unknown actions still fail closed,
+  and a missing or invalid required extra is named precisely. The laptop reads
+  the version and says when the app is too old instead of timing out
+  (phone-link#63).
+- `state.txt` starts with `contract_version 1` and carries the non-secret
+  saved-profile index (`saved_index_version 1`, a count and one line per saved
+  proxy), so `phone-proxy-switch --list` shows the saved names and ports while
+  the service is stopped instead of two empty lists. No password, token or
+  document body is written (phone-link#88).
+
 ## [0.13.4] - 2026-11-27
 
 ### Added

@@ -1,0 +1,1 @@
+Saved proxies are listed even while the proxy is stopped, and the app now reports contract version 1 with its seven adb actions from one table. The laptop can say when an app is too old instead of waiting for a timeout.
