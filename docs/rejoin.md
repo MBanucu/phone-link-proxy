@@ -91,13 +91,16 @@ None of these are app-side rejoin:
 
 - the user taps the network in Settings;
 - USB tethering, then `any_network` for the listener;
-- a topology that does not depend on the phone's client association, such as
-  an always-on external AP or a phone-hosted link;
 - a laptop-side action while the phone still auto-joins.
 
-Those belong to the topology work in `MBanucu/phone-link`
-([#37](https://github.com/MBanucu/phone-link/issues/37),
-[#38](https://github.com/MBanucu/phone-link/issues/38)) and, for P2P, to
+The topologies that would not depend on the phone's client association — an
+always-on external AP and a phone-hosted hotspot — were considered and closed
+as not planned in `MBanucu/phone-link`
+([#37 closing comment](https://github.com/MBanucu/phone-link/issues/37#issuecomment-7241963244),
+[#38 closing comment](https://github.com/MBanucu/phone-link/issues/38#issuecomment-7241963907)).
+The chosen recovery is the phone rejoining the laptop AP that is already
+configured, with the hairpin (`ap.uplink = "tunnel"`) keeping that link
+validated so the phone does not drop it for lack of internet. For P2P, see
 [Wi-Fi Direct](wifi-direct.md).
 
 ## Related decisions

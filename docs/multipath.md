@@ -90,8 +90,9 @@ All of these, together:
 2. A proxy that accepts MPTCP on both the listener and the upstream side, or a
    userspace multipath protocol with a scheduler and reorder buffer.
 3. A benchmark that shows one flow beating the best single path. Parallel
-   connections are not aggregation; the proxy already has a connection ceiling
-   and a selector refactor in flight ([#37](https://github.com/MBanucu/phone-link-proxy/issues/37)).
+   connections are not aggregation; the proxy already has a connection ceiling,
+   and the selector refactor landed
+   ([#37](https://github.com/MBanucu/phone-link-proxy/issues/37)).
 
 Until then the USB path remains a fallback transport, not a bonded one. The
 existing `any_network` switch already opens the wildcard listener on USB; that

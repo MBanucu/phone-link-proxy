@@ -166,6 +166,11 @@ never from a synchronous `getAllNetworks()` inside a callback. The rules:
 | Two links matching, or a match beside an unreadable link | paused — ambiguous |
 | Tethering or USB | not a match; only `any_network` opens there |
 
+The AP-client gate is the only supported topology: `any_network` exists for USB
+tethering and the rejoin fallback, not as a hotspot allowance — that proposal
+([#38](https://github.com/MBanucu/phone-link/issues/38#issuecomment-7241963907))
+was closed as not planned.
+
 Allowed means `Port.bind` and `ProxyService.uplinkUp` (the one place
 `AdbWireless` may be asked to switch wireless debugging back on). Not allowed
 means `Port.pause`: the `Socks5Server` is closed and its clients go, but the
