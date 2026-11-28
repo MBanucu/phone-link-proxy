@@ -229,7 +229,12 @@ first and takes the app's saved proxies with it.
 - `tests/proxy-app.test.sh` — hermetic, plain JDK. It compiles `Upstream`,
   `Closeables`, `EgressPolicy`, `EgressState`, `ProxyConfig`, `ProxyState`,
   `ProxyRuntime` and `Socks5Server` **without** `android.jar` and runs the
-  protocol and configuration cases:
+  protocol and configuration cases. The cases live one area per file under
+  `test/org/phonelink/proxy/` (`Socks5TcpTest`, `Socks5LifecycleTest`,
+  `Socks5UdpTest`, `ConfigTest`, `ProfileDocumentTest`, `ProfileTransferTest`,
+  `BootGateTest`, `EgressPolicyTest`, `ProxyStateTest`, …), with the assertions,
+  loopback helpers and fixtures in `TestSupport`. `--only udp` runs one area,
+  and `--only 'socks5-*'` or `--only tcp,udp` selects more than one. The cases:
   method negotiation, both credential failures, unauthenticated mode, CONNECT
   for IPv4 and for a domain name, relaying 32 KiB, half-close, 60 concurrent
   connections, the count returning to the live flows, a half-closed relay
