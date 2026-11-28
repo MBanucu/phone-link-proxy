@@ -504,7 +504,7 @@ public final class TestSupport {
                 socket.setTcpNoDelay(true);
                 return socket;
             } catch (IOException e) {
-                throw new Failure(Socks5Server.REPLY_CONNECTION_REFUSED, e.getMessage());
+                throw new Failure(Handshake.REPLY_CONNECTION_REFUSED, e.getMessage());
             }
         }
 
@@ -517,7 +517,7 @@ public final class TestSupport {
             try {
                 return new DatagramSocket(0, InetAddress.getLoopbackAddress());
             } catch (IOException e) {
-                throw new Failure(Socks5Server.REPLY_GENERAL_FAILURE, e.getMessage());
+                throw new Failure(Handshake.REPLY_GENERAL_FAILURE, e.getMessage());
             }
         }
 
@@ -526,7 +526,7 @@ public final class TestSupport {
             try {
                 return InetAddress.getAllByName(host);
             } catch (IOException e) {
-                throw new Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+                throw new Failure(Handshake.REPLY_HOST_UNREACHABLE,
                         "cannot resolve " + host + ": " + e.getMessage());
             }
         }
@@ -620,7 +620,7 @@ public final class TestSupport {
                 socket.setTcpNoDelay(true);
                 return socket;
             } catch (IOException e) {
-                throw new Failure(Socks5Server.REPLY_CONNECTION_REFUSED, e.getMessage());
+                throw new Failure(Handshake.REPLY_CONNECTION_REFUSED, e.getMessage());
             }
         }
 

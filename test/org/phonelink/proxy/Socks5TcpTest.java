@@ -154,7 +154,7 @@ public final class Socks5TcpTest {
             try (Fixture fixture = new Fixture(); Socket socket = fixture.open()) {
                 handshake(socket);
                 requestConnect(socket, 0x02, 0x01, "127.0.0.1", 80);
-                assertEqual(Socks5Server.REPLY_COMMAND_NOT_SUPPORTED, readReply(socket), "reply code");
+                assertEqual(Handshake.REPLY_COMMAND_NOT_SUPPORTED, readReply(socket), "reply code");
             }
         });
 
@@ -165,19 +165,19 @@ public final class Socks5TcpTest {
                 socket.getOutputStream().write(request);
                 socket.getOutputStream().flush();
                 assertEqual(
-                        Socks5Server.REPLY_ADDRESS_TYPE_NOT_SUPPORTED, readReply(socket), "reply code");
+                        Handshake.REPLY_ADDRESS_TYPE_NOT_SUPPORTED, readReply(socket), "reply code");
             }
         });
 
         run("an upstream failure reply is forwarded", () -> {
             Upstream failing = (host, port, timeoutMs) -> {
-                throw new Upstream.Failure(Socks5Server.REPLY_CONNECTION_REFUSED, "refused");
+                throw new Upstream.Failure(Handshake.REPLY_CONNECTION_REFUSED, "refused");
             };
             try (Fixture fixture = new Fixture(USER, PASSWORD, failing);
                     Socket socket = fixture.open()) {
                 handshake(socket);
                 requestConnect(socket, 0x01, 0x01, "127.0.0.1", 80);
-                assertEqual(Socks5Server.REPLY_CONNECTION_REFUSED, readReply(socket), "reply code");
+                assertEqual(Handshake.REPLY_CONNECTION_REFUSED, readReply(socket), "reply code");
             }
         });
     }

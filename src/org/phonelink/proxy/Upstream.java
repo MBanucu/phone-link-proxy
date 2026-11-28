@@ -24,7 +24,7 @@ interface Upstream {
      * knows CONNECT cannot accidentally relay UDP over the wrong network.
      */
     default DatagramSocket datagram() throws Failure {
-        throw new Failure(Socks5Server.REPLY_COMMAND_NOT_SUPPORTED,
+        throw new Failure(Handshake.REPLY_COMMAND_NOT_SUPPORTED,
                 "this upstream cannot carry UDP");
     }
 
@@ -36,7 +36,7 @@ interface Upstream {
      * which is the laptop, so the implementation has to ask on the egress.
      */
     default InetAddress[] resolve(String host) throws Failure {
-        throw new Failure(Socks5Server.REPLY_HOST_UNREACHABLE,
+        throw new Failure(Handshake.REPLY_HOST_UNREACHABLE,
                 "this upstream cannot resolve " + host);
     }
 
