@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-28
+
+### Added
+
+- The listener comes back by itself after an app update when `auto_start` is
+  on: a non-exported `MY_PACKAGE_REPLACED` receiver makes the same decision as
+  the boot receiver, so `adb install -r` no longer leaves the port shut until
+  somebody opens the app. With `auto_start` off the update leaves it stopped,
+  as a reboot does.
+
 ## [0.16.0] - 2026-11-28
 
 ### Added

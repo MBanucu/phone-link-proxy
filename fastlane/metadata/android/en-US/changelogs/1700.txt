@@ -1,0 +1,1 @@
+Comes back by itself after an app update when auto-start is on.
