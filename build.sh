@@ -18,6 +18,10 @@
 #   build/devicetest.apk        the test-only instrumentation that runs the
 #                               panel's own checks inside the proxy's process
 #                               (sources in devicetest/)
+#
+# With --bundle it also writes build/phone-link-proxy.aab: the same app packed
+# for Google Play, linked in proto format and packed by bundletool. An AAB is
+# signed with jarsigner, not apksigner.
 set -eu
 
 here=$(cd -- "$(dirname -- "$0")" && pwd -P)
@@ -28,21 +32,21 @@ dev_keystore="$build/dev.keystore"
 
 # A publishable build passes --release. It refuses to fall back to the dev key:
 # an APK meant for other people is only ever signed with PHONE_APP_KEYSTORE.
+# --bundle adds the Android App Bundle Google Play wants; it is signed with the
+# same key as the APKs and is independent of --release.
 release=0
-if [ "$#" -gt 1 ]; then
-    echo "usage: build.sh [--release]" >&2
-    exit 2
-fi
-if [ "$#" -eq 1 ]; then
-    case $1 in
+bundle=0
+for arg in "$@"; do
+    case $arg in
         --release) release=1 ;;
+        --bundle) bundle=1 ;;
         *)
-            echo "build.sh: unknown argument: $1" >&2
-            echo "usage: build.sh [--release]" >&2
+            echo "build.sh: unknown argument: $arg" >&2
+            echo "usage: build.sh [--release] [--bundle]" >&2
             exit 2
             ;;
     esac
-fi
+done
 
 sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
 if [ -z "$sdk" ]; then
@@ -224,6 +228,53 @@ build_apk() {
     echo "built $apk ($(wc -c < "$apk") bytes)"
 }
 
+# build_bundle
+#
+# The Google Play artifact: aapt2 links the same resources in proto format,
+# bundletool packs the base module into an AAB and jarsigner signs it. Nothing
+# is recompiled, so the bundle and the APK cannot drift.
+build_bundle() {
+    if ! command -v bundletool >/dev/null 2>&1; then
+        echo "build.sh: --bundle needs bundletool on PATH; run inside 'nix develop'" >&2
+        return 1
+    fi
+
+    work="$build/phone-link-proxy-bundle"
+    rm -rf "$work"
+    mkdir -p "$work/base/manifest" "$work/base/dex"
+    proto="$work/proto.apk"
+    "$build_tools/aapt2" link --proto-format \
+        --manifest "$build/phone-link-proxy/AndroidManifest.xml" \
+        -I "$android_jar" \
+        -o "$proto" \
+        "$build/phone-link-proxy/res/resources.zip"
+
+    # A module keeps the manifest under manifest/, while aapt2 leaves it at the
+    # archive root. jar is the JDK's unzip, already required by the build.
+    (cd "$work/base" && jar xf "$proto")
+    mv "$work/base/AndroidManifest.xml" "$work/base/manifest/"
+    cp "$build/phone-link-proxy/dex/classes.dex" "$work/base/dex/"
+    (cd "$work/base" && zip -q -r "$work/base.zip" .)
+
+    aab="$build/phone-link-proxy.aab"
+    bundletool build-bundle --modules="$work/base.zip" --output="$aab" --overwrite
+
+    # An AAB takes a JAR signature; apksigner only knows APKs. The keystore and
+    # alias are the same as the APKs, and the passwords stay in the environment.
+    set -- -keystore "$keystore"
+    if [ -n "${PHONE_APP_KEYSTORE:-}" ]; then
+        set -- "$@" -storepass:env PHONE_APP_KEYSTORE_PASS
+        if [ -n "${PHONE_APP_KEY_PASS:-}" ]; then
+            set -- "$@" -keypass:env PHONE_APP_KEY_PASS
+        fi
+    else
+        set -- "$@" -storepass android -keypass android
+    fi
+    jarsigner "$@" "$aab" "$key_alias" >/dev/null
+    jarsigner -verify "$aab" >/dev/null
+    echo "built $aab ($(wc -c < "$aab") bytes)"
+}
+
 build_apk phone-link-proxy "$here/src" "$here/res" "$here/AndroidManifest.xml"
 
 # The same app under org.phonelink.proxy.test, which is what the live harness
@@ -247,3 +298,7 @@ test_manifest="$build/devicetest-manifest.xml"
 sed -e "s|android:targetPackage=\"[^\"]*\"|android:targetPackage=\"$proxy_id\"|" \
     "$here/devicetest/AndroidManifest.xml" >"$test_manifest"
 build_apk devicetest "$here/devicetest/src" "$here/devicetest/res" "$test_manifest"
+
+if [ "$bundle" = 1 ]; then
+    build_bundle
+fi

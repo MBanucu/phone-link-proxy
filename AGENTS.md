@@ -8,7 +8,8 @@ Notes for whoever — person or agent — is changing this checkout.
   `apksigner`, no Gradle and no dependencies. It writes four APKs into
   `build/`: the app, its test build (`org.phonelink.proxy.test`), the capture
   service the live harness reads the screen from, and the on-device
-  instrumentation.
+  instrumentation. `--bundle` also writes the Google Play AAB with
+  `bundletool`, signed by `jarsigner`.
 - `src/`, `res/`, `AndroidManifest.xml` — the app. `test/` is the Android-free
   unit test, `capture/` and `devicetest/` are test-only.
 - `docs/architecture.md` — the app's layers, class table, lifecycle, state and
