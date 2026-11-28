@@ -261,6 +261,18 @@ holds the service switches, stored port and connection ceiling, SSID,
 one). It is written by the service and by every store change, so it survives
 the service being stopped — which is when a broken phone is diagnosed.
 
+It also carries the saved-proxy index, `SavedIndex`'s answer to a stopped
+service's empty `dumpsys`: `saved_index_version 1`, `saved_index_count <n>`,
+then one line per saved proxy,
+`saved_index <b64(name)> <port> <b64(user)> <anonymous 0|1> <auto_start 0|1> <b64(ssid)> <any_network 0|1>`.
+Names, users and SSIDs are URL-safe Base64 with standard `=` padding, so
+spaces, quotes and non-ASCII text stay in one field; an empty field is `~`,
+which is outside that alphabet. With no saved proxies the block says
+`saved_index_count 0` and `saved_index none`, so "none" is different from a
+file that never carried an index. The index holds names, ports, users, SSIDs
+and switches only: never a password, token, export document body or any line of
+one.
+
 ### `dumpsys`
 
 `adb shell dumpsys activity service org.phonelink.proxy/.ProxyService` prints

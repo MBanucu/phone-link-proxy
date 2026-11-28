@@ -67,6 +67,7 @@ sources=(
   "$ROOT/src/org/phonelink/proxy/Traffic.java"
   "$ROOT/src/org/phonelink/proxy/ProfileDocument.java"
   "$ROOT/src/org/phonelink/proxy/ProfileTransfer.java"
+  "$ROOT/src/org/phonelink/proxy/SavedIndex.java"
   "$ROOT/src/org/phonelink/proxy/TransferGate.java"
   "$ROOT/src/org/phonelink/proxy/UplinkPolicy.java"
 )

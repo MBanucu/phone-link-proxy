@@ -67,6 +67,8 @@ public final class AllTests {
                 ProfileDocumentTest::cases));
         suites.add(new Suite("profile-transfer", new String[] {"transfer"},
                 ProfileTransferTest::cases));
+        suites.add(new Suite("saved-index", new String[] {"index"},
+                SavedIndexTest::cases));
         return suites;
     }
 

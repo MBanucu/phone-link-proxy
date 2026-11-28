@@ -238,6 +238,20 @@ final class ConfigStore {
         // written only when the receiver has not run in this boot and
         // auto-start is on; the panel and the doctor phrase the conclusion.
         text.append(BootGate.stateText(bootMissedAt(context))).append('\n');
+        // The saved proxies are the other thing a stopped service cannot dump.
+        // Built from the fields a card shows — never the stored password — so a
+        // check can say "these are saved, the service is stopped" instead of
+        // showing two empty lists.
+        List<SavedIndex.Entry> saved = new ArrayList<>();
+        for (String name : profileNames(context)) {
+            ProxyConfig savedConfig = profile(context, name);
+            if (savedConfig == null) {
+                continue;
+            }
+            saved.add(new SavedIndex.Entry(name, savedConfig,
+                    profileAutoStart(context, name)));
+        }
+        text.append(SavedIndex.format(saved));
         File dir;
         try {
             dir = context.getExternalFilesDir(null);
